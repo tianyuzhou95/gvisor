@@ -1,2 +1,5 @@
 # Generated bazel symlinks.
 /bazel-*
+
+/go.mod
+/go.sum
