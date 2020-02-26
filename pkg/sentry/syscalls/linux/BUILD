@@ -53,6 +53,7 @@ go_library(
         "sys_utsname.go",
         "sys_write.go",
         "sys_xattr.go",
+        "sys_overflow.go",
         "timespec.go",
     ],
     visibility = ["//:sandbox"],
