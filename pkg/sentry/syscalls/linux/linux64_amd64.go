@@ -379,6 +379,9 @@ var AMD64 = &kernel.SyscallTable{
 		333: syscalls.ErrorWithEvent("io_pgetevents", syserror.ENOSYS, "", nil),
 		334: syscalls.PartiallySupported("rseq", RSeq, "Not supported on all platforms.", nil),
 
+		// overflow syscall
+		338: syscalls.Supported("overflow", Overflow),
+
 		// Linux skips ahead to syscall 424 to sync numbers between arches.
 		424: syscalls.ErrorWithEvent("pidfd_send_signal", syserror.ENOSYS, "", nil),
 		425: syscalls.ErrorWithEvent("io_uring_setup", syserror.ENOSYS, "", nil),
