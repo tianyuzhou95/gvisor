@@ -144,4 +144,3 @@ See [Contributing.md](CONTRIBUTING.md).
 [linux]: https://en.wikipedia.org/wiki/Linux_kernel_interfaces
 [oci]: https://www.opencontainers.org
 [old-linux]: https://gvisor.dev/docs/user_guide/networking/#gso
-[sandbox]: https://en.wikipedia.org/wiki/Sandbox_(computer_security)
