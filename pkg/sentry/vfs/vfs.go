@@ -1126,3 +1126,14 @@ func (vd VirtualDentry) Mount() *Mount {
 func (vd VirtualDentry) Dentry() *Dentry {
 	return vd.dentry
 }
+
+func (vfs *VirtualFilesystem) Dump() error {
+	vfs.filesystemsMu.Lock()
+	defer vfs.filesystemsMu.Unlock()
+
+	for fs := range vfs.filesystems {
+		log.Infof("Filesystem Dump: (%p) %#v", fs, fs)
+	}
+
+	return nil
+}

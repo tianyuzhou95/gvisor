@@ -658,6 +658,16 @@ func (s *Sandbox) DeleteTraceSession(name string) error {
 	return nil
 }
 
+
+// PrintFileSystems prints file systems status and statistics into log.
+func (s *Sandbox) PrintFileSystems() error {
+	log.Debugf("Print file systems status")
+	if err := s.call(boot.ContainerPrintFileSystems, nil, nil); err != nil {
+		return fmt.Errorf("PrintFileSystems failed: %v", err)
+	}
+	return nil
+}
+
 // ListTraceSessions lists all trace sessions.
 func (s *Sandbox) ListTraceSessions() ([]seccheck.SessionConfig, error) {
 	log.Debugf("Listing trace sessions in sandbox %q", s.ID)

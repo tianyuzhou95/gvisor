@@ -2104,3 +2104,7 @@ func (k *Kernel) ContainerName(cid string) string {
 	defer k.extMu.Unlock()
 	return k.containerNames[cid]
 }
+
+func (k *Kernel) PrintFileSystems() {
+	k.vfs.Dump()
+}

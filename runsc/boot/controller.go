@@ -111,6 +111,9 @@ const (
 	// ContMgrDeleteTraceSession deletes a trace session.
 	ContMgrDeleteTraceSession = "containerManager.DeleteTraceSession"
 
+	// ContainerPrintFileSystems prints file systems status and statistics into log.
+	ContainerPrintFileSystems = "containerManager.PrintFileSystems"
+
 	// ContMgrListTraceSessions lists a trace session.
 	ContMgrListTraceSessions = "containerManager.ListTraceSessions"
 
@@ -985,5 +988,10 @@ func (cm *containerManager) Mount(args *MountArgs, _ *struct{}) error {
 func (cm *containerManager) ContainerRuntimeState(cid *string, state *ContainerRuntimeState) error {
 	log.Debugf("containerManager.ContainerRuntimeState: cid: %s", *cid)
 	*state = cm.l.containerRuntimeState(*cid)
+	return nil
+}
+
+func (cm *containerManager) PrintFileSystems(_ *struct{}, _ *struct{}) error {
+	cm.l.k.PrintFileSystems()
 	return nil
 }

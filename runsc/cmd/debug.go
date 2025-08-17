@@ -50,6 +50,7 @@ type Debug struct {
 	duration     time.Duration
 	ps           bool
 	mount        string
+	printFileSystems bool
 }
 
 // Name implements subcommands.Command.
@@ -84,6 +85,7 @@ func (d *Debug) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&d.logPackets, "log-packets", "", "A boolean value to enable or disable packet logging: true or false.")
 	f.BoolVar(&d.ps, "ps", false, "lists processes")
 	f.StringVar(&d.mount, "mount", "", "Mount a filesystem (-mount fstype:source:destination).")
+	f.BoolVar(&d.printFileSystems, "print-file-systems", false, "if true, print file systems status.")
 }
 
 // Execute implements subcommands.Command.Execute.
@@ -237,6 +239,12 @@ func (d *Debug) Execute(_ context.Context, f *flag.FlagSet, args ...any) subcomm
 		if err := c.Sandbox.Mount(c.ID, fstype, src, dest); err != nil {
 			util.Fatalf("%s", err.Error())
 		}
+	}
+	if d.printFileSystems {
+		if err := c.Sandbox.PrintFileSystems(); err != nil {
+			util.Fatalf(err.Error())
+		}
+		log.Infof("PrintFileSystems succeed")
 	}
 
 	// Open profiling files.
