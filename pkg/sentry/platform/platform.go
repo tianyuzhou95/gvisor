@@ -326,6 +326,10 @@ var (
 	// Context was interrupted by a call to Context.Interrupt().
 	ErrContextInterrupt = fmt.Errorf("interrupted by platform.Context.Interrupt()")
 
+	// ErrContextOOM is returned by Context.Switch() to indicate that the
+	// OOM is invoked.
+	ErrContextOOM = fmt.Errorf("interrupted by OOM")
+
 	// ErrContextCPUPreempted is returned by Context.Switch() to indicate that
 	// one of the following occurred:
 	//
@@ -592,6 +596,10 @@ type Options struct {
 	// as CPU numbers in the sentry. This is necessary to support features like
 	// rseq
 	UseCPUNums bool
+
+	// SandboxID is the sandbox identifier, used by slimvm to pass to the
+	// host kernel module for sandbox identification.
+	SandboxID string
 }
 
 // Constructor represents a platform type.

@@ -1,4 +1,4 @@
-// Copyright 2019 The gVisor Authors.
+// Copyright 2026 The gVisor Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build linux && !debug
-// +build linux,!debug
+package slimvm
 
-// Package platforms imports all available platform packages.
-package platforms
-
-import (
-	// Import platforms that runsc might use.
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/kvm"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/slimvm"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/ptrace"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/systrap"
+const (
+	// reservedMemory is a chunk of physical memory reserved starting at
+	// physical address zero. There are some special pages in this region,
+	// so we just call the whole thing off.
+	reservedMemory = 0x100000000
 )

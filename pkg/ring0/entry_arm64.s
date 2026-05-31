@@ -64,6 +64,7 @@
 #define El0ErrNMI               34 // +checkconst . El0ErrNMI
 #define PageFault               23 // +checkconst . PageFault
 #define Syscall                 22 // +checkconst . Syscall
+#define OOMException         10 // +checkconst . OOMException
 #define VirtualizationException 35 // +checkconst . VirtualizationException
 
 #define PTRACE_REGS     0 // +checkoffset linux PtraceRegs.Regs
@@ -765,7 +766,10 @@ TEXT ·El0_irq(SB),NOSPLIT,$0
 	B ·Shutdown(SB)
 
 TEXT ·El0_fiq(SB),NOSPLIT,$0
-	B ·Shutdown(SB)
+	KERNEL_ENTRY_FROM_EL0
+	MOVD $0x8400000a, R8
+	HVC $0
+	EXCEPTION_EL0(OOMException)
 
 TEXT ·El0_error(SB),NOSPLIT,$0
 	KERNEL_ENTRY_FROM_EL0

@@ -1,4 +1,4 @@
-// Copyright 2019 The gVisor Authors.
+// Copyright 2026 The gVisor Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build linux && !debug
-// +build linux,!debug
+//go:build amd64
+// +build amd64
 
-// Package platforms imports all available platform packages.
-package platforms
+package slimvm
 
-import (
-	// Import platforms that runsc might use.
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/kvm"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/slimvm"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/ptrace"
-	_ "gvisor.dev/gvisor/pkg/sentry/platform/systrap"
-)
+// Release releases the page tables.
+func (as *addressSpace) Release() {
+	as.Unmap(0, ^uint64(0))
+
+	// Free all pages from the allocator.
+	as.pageTables.Allocator.(allocator).base.Drain()
+
+	// Drop all cached machine references.
+	as.machine.dropPageTables(as.pcid)
+}

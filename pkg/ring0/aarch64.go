@@ -102,5 +102,6 @@ const (
 const (
 	Syscall                 Vector = El0SyncSVC
 	PageFault               Vector = El0SyncDa
+	OOMException            Vector = El0Fiq
 	VirtualizationException Vector = El0ErrBounce
 )
