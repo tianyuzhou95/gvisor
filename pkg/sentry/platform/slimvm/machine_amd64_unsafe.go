@@ -18,10 +18,11 @@
 package slimvm
 
 import (
-	"syscall"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 )
 
 // loadSegments copies the current segments.
@@ -30,15 +31,15 @@ import (
 //
 //go:nosplit
 func (c *vCPU) loadSegments(tid uint64) {
-	if _, _, errno := syscall.RawSyscall(
-		syscall.SYS_ARCH_PRCTL,
+	if errno := hostsyscall.RawSyscallErrno(
+		unix.SYS_ARCH_PRCTL,
 		linux.ARCH_GET_FS,
 		uintptr(unsafe.Pointer(&c.CPU.Registers().Fs_base)),
 		0); errno != 0 {
 		throw("getting FS segment")
 	}
-	if _, _, errno := syscall.RawSyscall(
-		syscall.SYS_ARCH_PRCTL,
+	if errno := hostsyscall.RawSyscallErrno(
+		unix.SYS_ARCH_PRCTL,
 		linux.ARCH_GET_GS,
 		uintptr(unsafe.Pointer(&c.CPU.Registers().Gs_base)),
 		0); errno != 0 {

@@ -15,16 +15,17 @@
 package slimvm
 
 import (
-	"syscall"
+	"golang.org/x/sys/unix"
 
 	"gvisor.dev/gvisor/pkg/hostarch"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 )
 
 // yield yields the CPU.
 //
 //go:nosplit
 func yield() {
-	syscall.RawSyscall(syscall.SYS_SCHED_YIELD, 0, 0, 0)
+	hostsyscall.RawSyscallErrno(unix.SYS_SCHED_YIELD, 0, 0, 0)
 }
 
 // calculateBluepillFault calculates the fault address range.

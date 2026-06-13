@@ -21,7 +21,9 @@ import (
 	"syscall"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/abi/linux"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 )
 
 //go:linkname entersyscall runtime.entersyscall
@@ -58,8 +60,8 @@ func (a *atomicAddressSpace) get() *addressSpace {
 //
 //go:nosplit
 func (c *vCPU) notify() {
-	_, _, errno := syscall.RawSyscall6(
-		syscall.SYS_FUTEX,
+	errno := hostsyscall.RawSyscallErrno6(
+		unix.SYS_FUTEX,
 		uintptr(unsafe.Pointer(&c.state)),
 		linux.FUTEX_WAKE,
 		math.MaxInt32, // Number of waiters.
@@ -95,15 +97,15 @@ func (c *vCPU) waitUntilNot(state uint32) bool {
 }
 
 // createVCPU create VCPU in slimvm.
-func (c *vCPU) createVCPU(memoryRegions []userMemoryRegion) (uintptr, uintptr, syscall.Errno) {
+func (c *vCPU) createVCPU(memoryRegions []userMemoryRegion) (uintptr, unix.Errno) {
 	c.vmxConfig.memoryRegionNum = uint64(len(memoryRegions))
 	c.vmxConfig.memoryRegionAddr = uintptr(unsafe.Pointer(&memoryRegions[0]))
 
-	return syscall.RawSyscall(syscall.SYS_IOCTL, slimvmFD, _SLIMVM_CREATE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig)))
+	return hostsyscall.RawSyscall(unix.SYS_IOCTL, slimvmFD, _SLIMVM_CREATE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig)))
 }
 
 func (c *vCPU) releaseVCPU() {
-	_, _, errno := syscall.RawSyscall(syscall.SYS_IOCTL, slimvmFD, _SLIMVM_RELEASE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig.vcpu)))
+	errno := hostsyscall.RawSyscallErrno(unix.SYS_IOCTL, slimvmFD, _SLIMVM_RELEASE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig.vcpu)))
 	if errno != 0 {
 		panic(fmt.Sprintf("error release free vCPU: %v %d", errno, c.vmxConfig.vcpu))
 	}

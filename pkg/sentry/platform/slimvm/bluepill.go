@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"syscall"
 
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 	"gvisor.dev/gvisor/pkg/ring0"
 	"gvisor.dev/gvisor/pkg/sighandling"
 )
@@ -61,7 +62,7 @@ func addrOfSighandler() uintptr
 //
 //go:nosplit
 func redpill() {
-	syscall.RawSyscall(^uintptr(0), 0, 0, 0)
+	hostsyscall.RawSyscallErrno(^uintptr(0), 0, 0, 0)
 }
 
 func saveSignalHandler() {

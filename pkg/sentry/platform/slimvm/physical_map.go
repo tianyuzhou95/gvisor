@@ -17,9 +17,10 @@ package slimvm
 import (
 	"fmt"
 	"sort"
-	"syscall"
 
+	"golang.org/x/sys/unix"
 	"gvisor.dev/gvisor/pkg/hostarch"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/ring0"
 )
@@ -74,12 +75,12 @@ func fillAddressSpace() (excludedRegions []region) {
 	required := uintptr(requiredAddr)
 	current := required // Attempted mmap size.
 	for filled := uintptr(0); filled < required && current > 0; {
-		addr, _, errno := syscall.RawSyscall6(
-			syscall.SYS_MMAP,
+		addr, errno := hostsyscall.RawSyscall6(
+			unix.SYS_MMAP,
 			0, // Suggested address.
 			current,
-			syscall.PROT_NONE,
-			syscall.MAP_ANONYMOUS|syscall.MAP_PRIVATE|syscall.MAP_NORESERVE,
+			unix.PROT_NONE,
+			unix.MAP_ANONYMOUS|unix.MAP_PRIVATE|unix.MAP_NORESERVE,
 			0, 0)
 		if errno != 0 {
 			// One page is the smallest mapping that can be allocated.

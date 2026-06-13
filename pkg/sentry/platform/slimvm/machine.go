@@ -172,7 +172,7 @@ func (m *machine) newVCPU() *vCPU {
 		panic(fmt.Sprintf("error initialization vCPU state: %v", err))
 	}
 
-	id, _, errno := c.createVCPU(m.memoryRegions)
+	id, errno := c.createVCPU(m.memoryRegions)
 	if errno != 0 {
 		panic(fmt.Sprintf("error creating new vCPU: %v", errno))
 	}

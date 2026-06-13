@@ -15,10 +15,10 @@
 package slimvm
 
 import (
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 	"gvisor.dev/gvisor/pkg/sentry/arch"
 )
 
@@ -49,8 +49,8 @@ func printHex(title []byte, val uint64) {
 		val = val >> 4
 	}
 	str[17] = '\n'
-	syscall.RawSyscall(syscall.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
-	syscall.RawSyscall(syscall.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&str[0])), 18)
+	hostsyscall.RawSyscallErrno(unix.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
+	hostsyscall.RawSyscallErrno(unix.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&str[0])), 18)
 }
 
 // bluepillDieCleanly reports a fatal condition encountered inside
@@ -65,9 +65,9 @@ func printHex(title []byte, val uint64) {
 //
 //go:nosplit
 func bluepillDieCleanly(msg []byte, status uint64) {
-	syscall.RawSyscall(syscall.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&msg[0])), uintptr(len(msg)))
+	hostsyscall.RawSyscallErrno(unix.SYS_WRITE, uintptr(unix.Stderr), uintptr(unsafe.Pointer(&msg[0])), uintptr(len(msg)))
 	printHex(dieStatusTitle, status)
-	syscall.RawSyscall(syscall.SYS_EXIT_GROUP, 99, 0, 0)
+	hostsyscall.RawSyscallErrno(unix.SYS_EXIT_GROUP, 99, 0, 0)
 }
 
 var dieStatusTitle = []byte("slimvm: fatal in bluepillHandler, status =")
@@ -141,9 +141,9 @@ func bluepillHandler(context unsafe.Pointer) {
 	}
 
 	for {
-		switch _, _, errno := syscall.RawSyscall(syscall.SYS_IOCTL, slimvmFD, _SLIMVM_RUN, uintptr(unsafe.Pointer(&c.vmxConfig))); errno {
+		switch errno := hostsyscall.RawSyscallErrno(unix.SYS_IOCTL, slimvmFD, _SLIMVM_RUN, uintptr(unsafe.Pointer(&c.vmxConfig))); errno {
 		case 0: // Expected case.
-		case syscall.EINTR:
+		case unix.EINTR:
 			// In SlimVM, bounce signals (SIG_BOUNCE) are consumed by
 			// the kernel module in slimvm_signal_handler() and never
 			// reach userspace. EINTR here is triggered by non-bounce
@@ -153,8 +153,8 @@ func bluepillHandler(context unsafe.Pointer) {
 			// if there is no pending bounce signal, EAGAIN is returned
 			// and we simply rerun the vCPU.
 			timeout := unix.Timespec{}
-			sig, _, errno := syscall.RawSyscall6(
-				syscall.SYS_RT_SIGTIMEDWAIT,
+			sig, errno := hostsyscall.RawSyscall6(
+				unix.SYS_RT_SIGTIMEDWAIT,
 				uintptr(unsafe.Pointer(&bounceSignalMask)),
 				0,                                 // siginfo.
 				uintptr(unsafe.Pointer(&timeout)), // zero timeout.
@@ -182,20 +182,20 @@ func bluepillHandler(context unsafe.Pointer) {
 				// Force injection below; the vCPU is ready.
 				c.runData.exitReason = _SLIMVM_EXIT_IRQ_WINDOW_OPEN
 			}
-		case syscall.EFAULT:
+		case unix.EFAULT:
 			// If a fault is not serviceable due to the host
 			// backing pages having page permissions, instead of an
 			// MMIO exit we receive EFAULT from the run ioctl. We
 			// always inject an NMI here since we may be in kernel
 			// mode and have interrupts disabled.
-			if _, _, errno := syscall.RawSyscall(
-				syscall.SYS_IOCTL,
+			if errno := hostsyscall.RawSyscallErrno(
+				unix.SYS_IOCTL,
 				slimvmFD,
 				_SLIMVM_NMI, uintptr(unsafe.Pointer(&c.vmxConfig.vcpu))); errno != 0 {
 				bluepillDieCleanly(dieMsgNMIInjection, uint64(errno))
 			}
 			continue // Rerun vCPU.
-		case syscall.ENOMEM:
+		case unix.ENOMEM:
 			// OOM happened. Trigger the OOM killer in HR3.
 			for i := 0; i < nrDummyBytes; i += 4096 {
 				dummyBytes[i] = 0xff
@@ -203,17 +203,17 @@ func bluepillHandler(context unsafe.Pointer) {
 
 			// We failed to trigger the OOM killer. It's possible that we have
 			// the enough memory now. Release the dummy bytes and try again.
-			if _, _, errno := syscall.RawSyscall(
-				syscall.SYS_MADVISE,
+			if errno := hostsyscall.RawSyscallErrno(
+				unix.SYS_MADVISE,
 				uintptr(unsafe.Pointer(&dummyBytes[0])),
 				uintptr(nrDummyBytes),
-				syscall.MADV_DONTNEED); errno != 0 {
+				unix.MADV_DONTNEED); errno != 0 {
 				bluepillDieCleanly(dieMsgOOMRelease, uint64(errno))
 			}
 
-			var now syscall.Timeval
-			if _, _, errno := syscall.RawSyscall(
-				syscall.SYS_GETTIMEOFDAY,
+			var now unix.Timeval
+			if errno := hostsyscall.RawSyscallErrno(
+				unix.SYS_GETTIMEOFDAY,
 				uintptr(unsafe.Pointer(&now)),
 				0, 0); errno != 0 {
 				bluepillDieCleanly(dieMsgOOMTime, uint64(errno))
@@ -289,5 +289,5 @@ func bluepillHandler(context unsafe.Pointer) {
 }
 
 func init() {
-	dummyBytes, _ = syscall.Mmap(-1, 0, nrDummyBytes, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANONYMOUS|syscall.MAP_PRIVATE)
+	dummyBytes, _ = unix.Mmap(-1, 0, nrDummyBytes, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_ANONYMOUS|unix.MAP_PRIVATE)
 }

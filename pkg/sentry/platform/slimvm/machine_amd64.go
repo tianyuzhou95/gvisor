@@ -27,6 +27,7 @@ import (
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/cpuid"
 	"gvisor.dev/gvisor/pkg/hostarch"
+	"gvisor.dev/gvisor/pkg/hostsyscall"
 	"gvisor.dev/gvisor/pkg/ring0"
 	"gvisor.dev/gvisor/pkg/ring0/pagetables"
 	"gvisor.dev/gvisor/pkg/sentry/arch/fpu"
@@ -37,8 +38,8 @@ import (
 func (m *machine) initArchState() error {
 	// Set the legacy TSS address. This address is covered by the reserved
 	// range (up to 4GB). In fact, this is a main reason it exists.
-	if _, _, errno := syscall.RawSyscall(
-		syscall.SYS_IOCTL,
+	if errno := hostsyscall.RawSyscallErrno(
+		unix.SYS_IOCTL,
 		slimvmFD,
 		_SLIMVM_SET_TSS_ADDR,
 		uintptr(reservedMemory-(3*hostarch.PageSize))); errno != 0 {

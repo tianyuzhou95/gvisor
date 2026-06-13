@@ -39,6 +39,7 @@ go_library(
         "//pkg/cpuid",
         "//pkg/fd",
         "//pkg/hostarch",
+        "//pkg/hostsyscall",
         "//pkg/log",
         "//pkg/seccomp",
         "//pkg/sentry/arch",
