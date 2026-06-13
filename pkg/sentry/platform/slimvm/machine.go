@@ -115,9 +115,6 @@ type vCPU struct {
 	// guestExits is the count of guest to host world switches.
 	guestExits atomicbitops.Uint64
 
-	// faults is a count of world faults (informational only).
-	faults uint32
-
 	// state is the vCPU state.
 	//
 	// This is a bitmask of the three fields (vCPU*) described above.

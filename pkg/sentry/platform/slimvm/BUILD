@@ -29,7 +29,6 @@ go_library(
         "physical_map.go",
         "thread_control.go",
         "physical_map_amd64.go",
-        "virtual_map.go",
     ],
     visibility = ["//pkg/sentry:internal"],
     deps = [
@@ -62,7 +61,6 @@ go_test(
     name = "slimvm_test",
     srcs = [
         "slimvm_test.go",
-        "virtual_map_test.go",
     ],
     embed = [":slimvm"],
     tags = [
