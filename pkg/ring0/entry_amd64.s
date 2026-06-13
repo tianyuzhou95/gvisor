@@ -62,7 +62,6 @@
 #define SIMDFloatingPointException 19 // +checkconst . SIMDFloatingPointException
 #define VirtualizationException    20 // +checkconst . VirtualizationException
 #define SecurityException          30 // +checkconst . SecurityException
-#define OOMException            32 // +checkconst . OOMException
 #define SyscallInt80               128 // +checkconst . SyscallInt80
 #define Syscall                    256 // +checkconst . Syscall
 
@@ -761,5 +760,4 @@ EXCEPTION_WITHOUT_ERROR(MachineCheck, ·machineCheck(SB), ·addrOfMachineCheck(S
 EXCEPTION_WITHOUT_ERROR(SIMDFloatingPointException, ·simdFloatingPointException(SB), ·addrOfSimdFloatingPointException(SB))
 EXCEPTION_WITHOUT_ERROR(VirtualizationException, ·virtualizationException(SB), ·addrOfVirtualizationException(SB))
 EXCEPTION_WITH_ERROR(SecurityException, ·securityException(SB), ·addrOfSecurityException(SB))
-EXCEPTION_WITH_ERROR(OOMException, ·oomException(SB), ·addrOfOOMException(SB))
 EXCEPTION_WITHOUT_ERROR(SyscallInt80, ·syscallInt80(SB), ·addrOfSyscallInt80(SB))

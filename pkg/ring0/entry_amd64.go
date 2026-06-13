@@ -117,7 +117,6 @@ func machineCheck()
 func simdFloatingPointException()
 func virtualizationException()
 func securityException()
-func oomException()
 func syscallInt80()
 
 // These returns the start address of the functions above.
@@ -146,7 +145,6 @@ func addrOfMachineCheck() uintptr
 func addrOfSimdFloatingPointException() uintptr
 func addrOfVirtualizationException() uintptr
 func addrOfSecurityException() uintptr
-func addrOfOOMException() uintptr
 func addrOfSyscallInt80() uintptr
 
 // Exception handler index.
@@ -172,6 +170,5 @@ var handlers = map[Vector]uintptr{
 	SIMDFloatingPointException: addrOfSimdFloatingPointException(),
 	VirtualizationException:    addrOfVirtualizationException(),
 	SecurityException:          addrOfSecurityException(),
-	OOMException:               addrOfOOMException(),
 	SyscallInt80:               addrOfSyscallInt80(),
 }

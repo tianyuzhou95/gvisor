@@ -337,10 +337,6 @@ func (c *vCPU) SwitchToUser(switchOpts ring0.SwitchOpts, info *linux.SignalInfo)
 	case ring0.Vector(bounce): // ring0.VirtualizationException
 		return hostarch.NoAccess, platform.ErrContextInterrupt
 
-	case ring0.Vector(guestOOM): // ring0.OOMException
-		c.FullRestore = true
-		return hostarch.NoAccess, platform.ErrContextOOM
-
 	case ring0.AlignmentCheck:
 		c.FullRestore = true
 		*info = linux.SignalInfo{
