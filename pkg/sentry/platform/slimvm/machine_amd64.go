@@ -20,7 +20,6 @@ package slimvm
 import (
 	"fmt"
 	"reflect"
-	"runtime/debug"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -45,17 +44,6 @@ func (m *machine) initArchState() error {
 		uintptr(reservedMemory-(3*hostarch.PageSize))); errno != 0 {
 		return errno
 	}
-
-	// Enable CPUID faulting, if possible. Note that this also serves as a
-	// basic platform sanity tests, since we will enter guest mode for the
-	// first time here. The recovery is necessary, since if we fail to read
-	// the platform info register, we will retry to host mode and
-	// ultimately need to handle a segmentation fault.
-	old := debug.SetPanicOnFault(true)
-	defer func() {
-		recover()
-		debug.SetPanicOnFault(old)
-	}()
 
 	return nil
 }
