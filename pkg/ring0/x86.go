@@ -136,7 +136,6 @@ const (
 	SIMDFloatingPointException
 	VirtualizationException
 	SecurityException = 0x1e
-	OOMException      = 0x20
 	SyscallInt80      = 0x80
 	_NR_INTERRUPTS    = 0x100
 )

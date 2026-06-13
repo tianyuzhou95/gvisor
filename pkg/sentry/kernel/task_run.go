@@ -262,15 +262,6 @@ func (app *runApp) execute(t *Task) taskRunState {
 		// loop to figure out why.
 		return (*runApp)(nil)
 
-	case platform.ErrContextOOM:
-		// The SlimVM kernel module injects OOMException (vector 32)
-		// when EPT memory allocation fails. A proper OOM killer that
-		// selects a container/process to reclaim memory is not yet
-		// implemented. Fail loudly so the issue is visible.
-		t.Warningf("OOM event received but OOM handler is not implemented")
-		t.PrepareExit(linux.WaitStatusTerminationSignal(linux.SIGKILL))
-		return (*runExit)(nil)
-
 	case platform.ErrContextSignal:
 		// Looks like a signal has been delivered to us. If it's a synchronous
 		// signal (SEGV, SIGBUS, etc.), it should be sent to the application

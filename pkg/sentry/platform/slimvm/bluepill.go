@@ -36,9 +36,6 @@ var (
 	// bounce is the interrupt vector used to return to the kernel.
 	bounce = uint32(ring0.VirtualizationException)
 
-	// guestOOM is the private interrupt vector used to process OOM.
-	guestOOM = uint32(ring0.OOMException)
-
 	// savedHandler is a pointer to the previous handler.
 	//
 	// This is called by bluepillHandler.
