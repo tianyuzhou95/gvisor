@@ -21,18 +21,13 @@ import (
 	"syscall"
 
 	"gvisor.dev/gvisor/pkg/atomicbitops"
+	"gvisor.dev/gvisor/pkg/bitmap"
 	"gvisor.dev/gvisor/pkg/hostarch"
 	"gvisor.dev/gvisor/pkg/hosttid"
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/ring0"
 	"gvisor.dev/gvisor/pkg/ring0/pagetables"
 	"gvisor.dev/gvisor/pkg/spinlock"
-)
-
-const (
-	vCPUsPoolSize       = 64
-	bitMapBaseLen       = 64
-	vCPUsPoolBitmapSize = (vCPUsPoolSize + bitMapBaseLen - 1) / bitMapBaseLen
 )
 
 // machine contains state associated with the VM as a whole.
@@ -59,8 +54,11 @@ type machine struct {
 
 	vCPUsPoolSpin spinlock.Spinlock
 
-	vCPUsPool   [vCPUsPoolSize]*vCPU
-	vCPUSBitmap [vCPUsPoolBitmapSize]uint64
+	// vCPUsPool caches idle vCPUs for reuse. vCPUsPoolBitmap tracks which
+	// slots are occupied (bit set == slot holds a cached vCPU). Both are
+	// protected by vCPUsPoolSpin.
+	vCPUsPool       []*vCPU
+	vCPUsPoolBitmap bitmap.Bitmap
 
 	memoryRegions []userMemoryRegion
 
@@ -154,7 +152,6 @@ type vCPU struct {
 //
 // Precondtion: mu must be held.
 func (m *machine) newVCPU() *vCPU {
-	// TODO: add VCPU limit in sentry side.
 	// Create the vCPU.
 	c := &vCPU{
 		machine: m,
@@ -187,22 +184,28 @@ func (m *machine) newVCPU() *vCPU {
 	return c // Done.
 }
 
-func (m *machine) vCPUsPoolInit() {
-	for i := 0; i < vCPUsPoolSize; i++ {
-		m.vCPUsPool[i] = nil
+// vCPUPoolSize returns the number of vCPUs to cache in the reuse pool:
+// GOMAXPROCS with a 3x overcommit factor, capped at _SLIMVM_NR_VCPUS.
+func vCPUPoolSize() int {
+	size := 3 * runtime.GOMAXPROCS(0)
+	if size > _SLIMVM_NR_VCPUS {
+		size = _SLIMVM_NR_VCPUS
 	}
+	return size
 }
 
 // newMachine returns a new VM context.
 func newMachine(sandboxID int64) (*machine, error) {
 	// Create the machine.
+	poolSize := vCPUPoolSize()
 	m := &machine{
-		vCPUs:     make(map[uint64]*vCPU),
-		sandboxID: sandboxID,
+		vCPUs:           make(map[uint64]*vCPU),
+		sandboxID:       sandboxID,
+		vCPUsPool:       make([]*vCPU, poolSize),
+		vCPUsPoolBitmap: bitmap.New(uint32(poolSize)),
 	}
 	m.available.L = &m.mu
 
-	// TODO: more general max vcpu number.
 	m.kernel.Init(_SLIMVM_NR_VCPUS)
 
 	// Create the upper shared pagetables and kernel(sentry) pagetables.
@@ -242,51 +245,34 @@ func newMachine(sandboxID int64) (*machine, error) {
 
 func (m *machine) getVCPUFromPool() *vCPU {
 	m.vCPUsPoolSpin.Lock()
-	for i := 0; i < vCPUsPoolSize; i += bitMapBaseLen {
-		bitmap := m.vCPUSBitmap[i/bitMapBaseLen]
-		if bitmap == 0 {
-			continue
-		}
-		var j int
-		for j = 0; j < bitMapBaseLen; j++ {
-			if bitmap&(1<<j) != 0 {
-				break
-			}
-		}
-		index := i*bitMapBaseLen + j
-		c := m.vCPUsPool[index]
-		if c == nil {
-			throw("cache vcpu is epmty, at busy bit")
-		}
-		m.vCPUsPool[index] = nil
-		m.vCPUSBitmap[i/bitMapBaseLen] &^= (1 << j)
-		m.vCPUsPoolSpin.Unlock()
-		return c
-	}
-	m.vCPUsPoolSpin.Unlock()
+	defer m.vCPUsPoolSpin.Unlock()
 
-	return nil
+	// A set bit marks an occupied slot. If there is none, the pool is empty.
+	index, err := m.vCPUsPoolBitmap.FirstOne(0)
+	if err != nil {
+		return nil
+	}
+	c := m.vCPUsPool[index]
+	if c == nil {
+		throw("cached vcpu is empty at an occupied bit")
+	}
+	m.vCPUsPool[index] = nil
+	m.vCPUsPoolBitmap.Remove(index)
+	return c
 }
 
 func (m *machine) cacheVCPU(c *vCPU, tid uint64) {
 	m.vCPUsPoolSpin.Lock()
-	for i := 0; i < vCPUsPoolSize; i += bitMapBaseLen {
-		bitmap := m.vCPUSBitmap[i/bitMapBaseLen]
-		if bitmap == ^uint64(0) {
-			continue
-		}
-		var j int
-		for j = 0; j < bitMapBaseLen; j++ {
-			if bitmap&(1<<j) == 0 {
-				break
-			}
-		}
-		index := i*bitMapBaseLen + j
+
+	// A clear bit marks a free slot. The bitmap may be rounded up to a
+	// multiple of 64, so a returned index beyond the pool size means full.
+	index, err := m.vCPUsPoolBitmap.FirstZero(0)
+	if err == nil && int(index) < len(m.vCPUsPool) {
 		if m.vCPUsPool[index] != nil {
-			throw("cache vcpu not epmty, at clean bit")
+			throw("cached vcpu not empty at a free bit")
 		}
 		m.vCPUsPool[index] = c
-		m.vCPUSBitmap[i/bitMapBaseLen] |= (1 << j)
+		m.vCPUsPoolBitmap.Add(index)
 		m.vCPUsPoolSpin.Unlock()
 		return
 	}
@@ -413,11 +399,9 @@ func (m *machine) Get() *vCPU {
 	}
 
 	for {
-		// Create a new vCPU.
-		// The hard limit of VCPUs number is set to 512, there is corner
-		// case that the M will exceeds 512 which will cause panic with
-		// original code logic. When the VCPUs number reach the limit, wait
-		// for the reclaim thread to relase some VCPUs.
+		// Reuse a cached vCPU if one is available, otherwise create a new
+		// one until we reach the hard per-machine limit _SLIMVM_NR_VCPUS.
+		// Once at the limit, wait for the reclaim thread to release a vCPU.
 		c := m.getVCPUFromPool()
 		if c == nil && len(m.vCPUs) < _SLIMVM_NR_VCPUS {
 			c = m.newVCPU()

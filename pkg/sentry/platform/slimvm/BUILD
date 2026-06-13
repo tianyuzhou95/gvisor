@@ -34,6 +34,7 @@ go_library(
     deps = [
         "//pkg/abi/linux",
         "//pkg/atomicbitops",
+        "//pkg/bitmap",
         "//pkg/context",
         "//pkg/cpuid",
         "//pkg/fd",
@@ -60,6 +61,7 @@ go_library(
 go_test(
     name = "slimvm_test",
     srcs = [
+        "machine_test.go",
         "slimvm_test.go",
     ],
     embed = [":slimvm"],
