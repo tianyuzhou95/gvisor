@@ -506,6 +506,14 @@ func (c *vCPU) sendSignal() {
 			break
 		} else if err.(syscall.Errno) == syscall.EAGAIN {
 			continue
+		} else if err.(syscall.Errno) == syscall.ESRCH {
+			// The target thread has already exited. Unlike KVM, a
+			// SlimVM vCPU is bound to whichever host thread last ran
+			// it (see loadSegments), and that thread may be gone by
+			// the time an asynchronous BounceToKernel fires. A dead
+			// thread is no longer in guest mode, so there is nothing
+			// left to bounce.
+			break
 		} else {
 			// Nothing else should be returned by tgkill.
 			panic(fmt.Sprintf("unexpected tgkill error: %v", err))
@@ -563,6 +571,10 @@ func (c *vCPU) bounce(forceGuestExit bool) {
 					break
 				} else if err.(syscall.Errno) == syscall.EAGAIN {
 					continue
+				} else if err.(syscall.Errno) == syscall.ESRCH {
+					// The target thread has already exited; see
+					// the note in sendSignal. Nothing to bounce.
+					break
 				} else {
 					// Nothing else should be returned by tgkill.
 					panic(fmt.Sprintf("unexpected tgkill error: %v", err))

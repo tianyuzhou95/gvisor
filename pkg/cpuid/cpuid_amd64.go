@@ -192,6 +192,14 @@ func (fs FeatureSet) VirtualAddressBits() uint32 {
 //go:nosplit
 func (fs FeatureSet) PhysicalAddressBits() uint32 {
 	ax, _, _, _ := fs.query(addressSizes)
+	// On AMD, CPUID 0x80000008 EAX[7:0] reports the physical address
+	// width before the bits consumed by memory encryption (SME/SEV) are
+	// subtracted. CPUID 0x8000001F EBX[11:6] (PhysAddrReduction) gives the
+	// number of those bits. Using the unreduced width would let SlimVM's
+	// fillAddressSpace map beyond the usable physical range.
+	if fs.AMD() {
+		return (ax & 0xff) - 1
+	}
 	return ax & 0xff
 }
 
