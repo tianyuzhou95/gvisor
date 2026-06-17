@@ -71,7 +71,7 @@ var (
 	slimvmFile *fd.FD
 )
 
-// OpenDevice opens the SlimVM device at /dev/kvm and returns the File.
+// OpenDevice opens the SlimVM device at /dev/slimvm and returns the File.
 func OpenDevice(devicePath string) (*fd.FD, error) {
 	if devicePath == "" {
 		devicePath = "/dev/slimvm"

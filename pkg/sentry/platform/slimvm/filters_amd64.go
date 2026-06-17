@@ -37,7 +37,7 @@ func (*SlimVM) SeccompInfo() platform.SeccompInfo {
 			unix.SYS_MMAP:            seccomp.MatchAll{},
 			unix.SYS_RT_SIGSUSPEND:   seccomp.MatchAll{},
 			unix.SYS_RT_SIGTIMEDWAIT: seccomp.MatchAll{},
-			0xffffffffffffffff:       seccomp.MatchAll{}, // SlimVM uses syscall -1 to transition to host.
+			redpillSyscall:           seccomp.MatchAll{},
 		}),
 		HotSyscalls: hottestSyscalls(),
 	}

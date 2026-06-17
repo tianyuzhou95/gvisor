@@ -24,7 +24,7 @@ import (
 
 // TODO: support configure thread reclaim
 const (
-	ReclaimPeriod = 5
+	ReclaimPeriod = 5 * time.Second
 	MaxThreads    = uint32(256)
 )
 
@@ -46,17 +46,11 @@ func reclaimThreads(m *machine, max uint32, n int) {
 	wg.Wait()
 }
 
-const defaultPeriod = 5 // seconds
-
 // StartReclaimDaemon starts a go routine to check extra Golang M periodly.
 func StartReclaimDaemon(m *machine) {
 	go func() {
 		for {
-			period := ReclaimPeriod
-			if period == 0 {
-				period = defaultPeriod
-			}
-			time.Sleep(time.Duration(period) * time.Second)
+			time.Sleep(ReclaimPeriod)
 
 			maxThreads := MaxThreads
 			curThreads, _ := runtime.ThreadCreateProfile(nil)

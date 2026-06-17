@@ -55,11 +55,14 @@ func sighandler()
 // assembly to get the ABI0 (i.e., primary) address.
 func addrOfSighandler() uintptr
 
+// redpillSyscall is syscall -1, used by SlimVM to transition to host.
+const redpillSyscall = ^uintptr(0)
+
 // redpill on amd64/arm64 invokes a syscall with -1.
 //
 //go:nosplit
 func redpill() {
-	hostsyscall.RawSyscallErrno(^uintptr(0), 0, 0, 0)
+	hostsyscall.RawSyscallErrno(redpillSyscall, 0, 0, 0)
 }
 
 func saveSignalHandler() {
