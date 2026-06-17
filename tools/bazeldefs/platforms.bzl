@@ -4,7 +4,7 @@
 platforms = {
     "ptrace": [],
     "kvm": [],
-    "slimvm": [],
+    "slimvm": ["manual", "requires-slimvm"],
     "systrap": [],
 }
 

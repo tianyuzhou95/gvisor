@@ -67,6 +67,7 @@ go_test(
     ],
     embed = [":slimvm"],
     tags = [
+        "manual",
         "nogotsan",
         "requires-slimvm",
     ],
