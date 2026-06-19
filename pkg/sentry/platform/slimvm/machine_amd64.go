@@ -132,9 +132,6 @@ func (c *vCPU) initArchState() error {
 	// Point to kernel page tables, with no initial PCID.
 	kernelSystemRegs.CR3 = c.machine.kernel.PageTables.CR3(false, 0)
 
-	// Set the CPUID; this is required before setting system registers,
-	// since KVM will reject several CR4 bits if the CPUID does not
-	// indicate the support is available.
 	if err := c.setCPUID(); err != nil {
 		return err
 	}
@@ -366,7 +363,7 @@ func (c *vCPU) SwitchToUser(switchOpts ring0.SwitchOpts, info *linux.SignalInfo)
 
 	case ring0.NMI:
 		// An NMI is generated only when a fault is not servicable by
-		// KVM itself, so we think some mapping is writeable but it's
+		// SlimVM itself, so we think some mapping is writeable but it's
 		// really not. This could happen, e.g. if some file is
 		// truncated (and would generate a SIGBUS) and we map it
 		// directly into the instance.

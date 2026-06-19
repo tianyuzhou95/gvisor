@@ -61,6 +61,9 @@ func (c *vCPU) setSystemRegisters(sregs *systemRegs) error {
 }
 
 // setCPUID sets the CPUID to be used by the guest.
+//
+// In SlimVM, guest CPU features are controlled via CPUID faulting and emulated
+// by the sentry, so no per-vCPU CPUID is needed.
 func (c *vCPU) setCPUID() error {
 	return nil
 }

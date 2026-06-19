@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	// bounceSignal is the signal used for bouncing KVM.
+	// bounceSignal is the signal used for bouncing the vCPU.
 	//
 	// We use SIGCHLD because it is not masked by the runtime, and
 	// it will be ignored properly by other parts of the kernel.

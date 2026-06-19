@@ -94,7 +94,7 @@ const (
 	vCPUWaiter uint32 = 1 << 2
 )
 
-// vCPU is a single KVM vCPU.
+// vCPU is a single SlimVM vCPU.
 type vCPU struct {
 	// CPU is the kernel CPU data.
 	//
@@ -246,7 +246,7 @@ func newMachine(sandboxID int64, applicationCores int) (*machine, error) {
 
 	// Apply the physical mappings. Note that these mappings may point to
 	// guest physical addresses that are not actually available. These
-	// physical pages are mapped on demand, see kernel_unsafe.go.
+	// physical pages are mapped on demand, see bluepill_unsafe.go.
 	applyPhysicalRegions(func(pr physicalRegion) bool {
 		// Map everything in the lower half.
 		m.kernel.PageTables.Map(

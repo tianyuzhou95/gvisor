@@ -31,7 +31,7 @@ import (
 
 // SlimVM represents a lightweight VM context.
 type SlimVM struct {
-	// TODO: support preemption as KVM.
+	// TODO: support CPU preemption detection.
 	platform.NoCPUPreemptionDetection
 
 	platform.UseHostProcessMemoryBarrier
