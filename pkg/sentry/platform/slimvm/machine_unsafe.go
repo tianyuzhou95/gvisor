@@ -15,7 +15,6 @@
 package slimvm
 
 import (
-	"fmt"
 	"math"
 	"sync/atomic"
 	"syscall"
@@ -102,11 +101,4 @@ func (c *vCPU) createVCPU(memoryRegions []userMemoryRegion) (uintptr, unix.Errno
 	c.vmxConfig.memoryRegionAddr = uintptr(unsafe.Pointer(&memoryRegions[0]))
 
 	return hostsyscall.RawSyscall(unix.SYS_IOCTL, slimvmFD, _SLIMVM_CREATE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig)))
-}
-
-func (c *vCPU) releaseVCPU() {
-	errno := hostsyscall.RawSyscallErrno(unix.SYS_IOCTL, slimvmFD, _SLIMVM_RELEASE_VCPU, uintptr(unsafe.Pointer(&c.vmxConfig.vcpu)))
-	if errno != 0 {
-		panic(fmt.Sprintf("error release free vCPU: %v %d", errno, c.vmxConfig.vcpu))
-	}
 }

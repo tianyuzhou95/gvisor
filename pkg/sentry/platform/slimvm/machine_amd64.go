@@ -20,6 +20,7 @@ package slimvm
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -64,6 +65,24 @@ func (m *machine) dropPageTables(pcid uint16) {
 		c.activePCIDs.clear(pcid)
 	}
 	dropPCID(pcid)
+}
+
+// getMaxVCPU sets m.maxVCPUs from GOMAXPROCS and the configured application
+// cores, bounded by the _SLIMVM_NR_VCPUS hard cap.
+func (m *machine) getMaxVCPU() {
+	// Allow a CPU overcommit factor of ~3, but give explicitly-configured
+	// application cores their own vCPU with room to spare (factor of 2).
+	n := 3 * runtime.GOMAXPROCS(0)
+	if d := 2 * m.applicationCores; n < d {
+		n = d
+	}
+	if n > _SLIMVM_NR_VCPUS {
+		n = _SLIMVM_NR_VCPUS
+	}
+	if n < 1 {
+		n = 1
+	}
+	m.maxVCPUs = n
 }
 
 // initArchState initializes architecture-specific state.

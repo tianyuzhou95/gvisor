@@ -52,7 +52,7 @@ func slimvmTest(t testHarness, setup func(*SlimVM), fn func(*vCPU) bool) {
 	if err != nil {
 		t.Fatalf("error opening device file: %v", err)
 	}
-	k, err := New(deviceFile, testSandboxID)
+	k, err := New(deviceFile, testSandboxID, 0)
 	if err != nil {
 		t.Fatalf("error creating SlimVM instance: %v", err)
 	}

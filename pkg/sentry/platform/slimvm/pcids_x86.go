@@ -47,12 +47,6 @@ func (bm *pcidBitmap) test(pcid uint16) bool {
 	return bm[pcid/64].Load()&(1<<(pcid%64)) != 0
 }
 
-func (bm *pcidBitmap) reset() {
-	for i := range bm {
-		bm[i].Store(0)
-	}
-}
-
 func initPCIDs() {
 	if !hasGuestPCID {
 		return

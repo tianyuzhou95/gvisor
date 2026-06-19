@@ -84,7 +84,7 @@ func OpenDevice(devicePath string) (*fd.FD, error) {
 }
 
 // New returns a new SlimVM-based implementation of the platform interface.
-func New(deviceFile *fd.FD, sandboxID string) (*SlimVM, error) {
+func New(deviceFile *fd.FD, sandboxID string, applicationCores int) (*SlimVM, error) {
 	slimvmFile = deviceFile
 	slimvmFD = uintptr(slimvmFile.FD())
 
@@ -100,12 +100,10 @@ func New(deviceFile *fd.FD, sandboxID string) (*SlimVM, error) {
 	sid, _ := strconv.ParseInt(sandboxID[:min(8, len(sandboxID))], 16, 64)
 
 	// Create a VM context.
-	machine, err := newMachine(sid)
+	machine, err := newMachine(sid, applicationCores)
 	if err != nil {
 		return nil, err
 	}
-
-	StartReclaimDaemon(machine)
 
 	// All set.
 	return &SlimVM{
@@ -163,7 +161,7 @@ func (k *SlimVM) NewContext(pkgcontext.Context) platform.Context {
 
 // ConcurrencyCount implements platform.Platform.ConcurrencyCount.
 func (k *SlimVM) ConcurrencyCount() int {
-	return int(MaxThreads)
+	return k.machine.maxVCPUs
 }
 
 // HealthCheck implements platform.Platform.HealthCheck.
@@ -175,8 +173,7 @@ func (k *SlimVM) HealthCheck() {
 type constructor struct{}
 
 func (*constructor) New(opts platform.Options) (platform.Platform, error) {
-	// TODO: add support to pass ApplicationCores
-	return New(opts.DeviceFile, opts.SandboxID)
+	return New(opts.DeviceFile, opts.SandboxID, opts.ApplicationCores)
 }
 
 func (*constructor) OpenDevice(devicePath string) (*fd.FD, error) {

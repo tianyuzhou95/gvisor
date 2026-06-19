@@ -27,7 +27,6 @@ go_library(
         "machine_unsafe.go",
         "pcids_x86.go",
         "physical_map.go",
-        "thread_control.go",
         "physical_map_amd64.go",
     ],
     visibility = ["//pkg/sentry:internal"],
@@ -48,7 +47,6 @@ go_library(
         "//pkg/sentry/platform",
         "//pkg/sentry/platform/interrupt",
         "//pkg/sighandling",
-        "//pkg/spinlock",
         "//pkg/hosttid",
         "//pkg/ring0",
         "//pkg/ring0/pagetables",
@@ -62,7 +60,6 @@ go_library(
 go_test(
     name = "slimvm_test",
     srcs = [
-        "machine_test.go",
         "slimvm_test.go",
     ],
     embed = [":slimvm"],

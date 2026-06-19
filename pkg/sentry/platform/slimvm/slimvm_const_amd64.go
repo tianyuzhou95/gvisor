@@ -29,6 +29,5 @@ const (
 	_SLIMVM_RUN          = 0x81f8e901
 	_SLIMVM_SET_TSS_ADDR = 0xe907
 	_SLIMVM_CREATE_VCPU  = 0xe908
-	_SLIMVM_RELEASE_VCPU = 0xe909
 	_SLIMVM_NMI          = 0xe90a
 )

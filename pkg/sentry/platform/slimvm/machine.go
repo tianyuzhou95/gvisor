@@ -24,10 +24,8 @@ import (
 	"gvisor.dev/gvisor/pkg/bitmap"
 	"gvisor.dev/gvisor/pkg/hostarch"
 	"gvisor.dev/gvisor/pkg/hosttid"
-	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/ring0"
 	"gvisor.dev/gvisor/pkg/ring0/pagetables"
-	"gvisor.dev/gvisor/pkg/spinlock"
 )
 
 // machine contains state associated with the VM as a whole.
@@ -52,13 +50,16 @@ type machine struct {
 	// These are populated dynamically.
 	vCPUs map[uint64]*vCPU
 
-	vCPUsPoolSpin spinlock.Spinlock
+	// allocatedVCPUIDs tracks IDs assigned to active vCPUs.
+	// It is protected by mu.
+	allocatedVCPUIDs bitmap.Bitmap
 
-	// vCPUsPool caches idle vCPUs for reuse. vCPUsPoolBitmap tracks which
-	// slots are occupied (bit set == slot holds a cached vCPU). Both are
-	// protected by vCPUsPoolSpin.
-	vCPUsPool       []*vCPU
-	vCPUsPoolBitmap bitmap.Bitmap
+	// maxVCPUs is the maximum number of vCPUs, set by getMaxVCPU. vCPUs are
+	// created lazily up to this limit.
+	maxVCPUs int
+
+	// applicationCores is used to compute maxVCPUs.
+	applicationCores int
 
 	memoryRegions []userMemoryRegion
 
@@ -148,14 +149,26 @@ type vCPU struct {
 	FullRestore bool
 }
 
-// newVCPU creates a returns a new vCPU.
+// newVCPU creates and returns a new vCPU. It returns nil when the per-machine
+// vCPU limit (m.maxVCPUs) is exhausted.
 //
 // Precondtion: mu must be held.
 func (m *machine) newVCPU() *vCPU {
+	id, ok := m.allocateVCPUID()
+	if !ok {
+		return nil
+	}
+	allocatedID := true
+	defer func() {
+		if allocatedID {
+			m.freeVCPUID(id)
+		}
+	}()
+
 	// Create the vCPU.
 	c := &vCPU{
 		machine: m,
-		id:      len(m.vCPUs),
+		id:      id,
 	}
 	c.CPU.Init(&m.kernel, c.id, c)
 
@@ -172,41 +185,57 @@ func (m *machine) newVCPU() *vCPU {
 		panic(fmt.Sprintf("error initialization vCPU state: %v", err))
 	}
 
-	id, errno := c.createVCPU(m.memoryRegions)
+	hostID, errno := c.createVCPU(m.memoryRegions)
 	if errno != 0 {
 		panic(fmt.Sprintf("error creating new vCPU: %v", errno))
 	}
 
-	c.vmxConfig.vcpu = uint64(id)
+	c.vmxConfig.vcpu = uint64(hostID)
 
 	c.vmxConfig.sandboxID = m.sandboxID
 
+	allocatedID = false
 	return c // Done.
 }
 
-// vCPUPoolSize returns the number of vCPUs to cache in the reuse pool:
-// GOMAXPROCS with a 3x overcommit factor, capped at _SLIMVM_NR_VCPUS.
-func vCPUPoolSize() int {
-	size := 3 * runtime.GOMAXPROCS(0)
-	if size > _SLIMVM_NR_VCPUS {
-		size = _SLIMVM_NR_VCPUS
+// allocateVCPUID allocates an unused vCPU ID, bounded by m.maxVCPUs.
+//
+// Precondition: mu must be held.
+func (m *machine) allocateVCPUID() (int, bool) {
+	id, err := m.allocatedVCPUIDs.FirstZero(0)
+	if err != nil || id >= uint32(m.maxVCPUs) {
+		return 0, false
 	}
-	return size
+	m.allocatedVCPUIDs.Add(id)
+	return int(id), true
+}
+
+// freeVCPUID releases a vCPU ID after the vCPU is destroyed.
+//
+// Precondition: mu must be held.
+func (m *machine) freeVCPUID(id int) {
+	if id < 0 || id >= _SLIMVM_NR_VCPUS {
+		panic(fmt.Sprintf("invalid vCPU ID: %d", id))
+	}
+	m.allocatedVCPUIDs.Remove(uint32(id))
 }
 
 // newMachine returns a new VM context.
-func newMachine(sandboxID int64) (*machine, error) {
+func newMachine(sandboxID int64, applicationCores int) (*machine, error) {
 	// Create the machine.
-	poolSize := vCPUPoolSize()
 	m := &machine{
-		vCPUs:           make(map[uint64]*vCPU),
-		sandboxID:       sandboxID,
-		vCPUsPool:       make([]*vCPU, poolSize),
-		vCPUsPoolBitmap: bitmap.New(uint32(poolSize)),
+		vCPUs:            make(map[uint64]*vCPU),
+		allocatedVCPUIDs: bitmap.New(_SLIMVM_NR_VCPUS),
+		sandboxID:        sandboxID,
+		applicationCores: applicationCores,
 	}
 	m.available.L = &m.mu
 
-	m.kernel.Init(_SLIMVM_NR_VCPUS)
+	// The ID bitmap is sized at the _SLIMVM_NR_VCPUS hard cap, which bounds
+	// maxVCPUs, so any allocated ID always fits.
+	m.getMaxVCPU()
+
+	m.kernel.Init(m.maxVCPUs)
 
 	// Create the upper shared pagetables and kernel(sentry) pagetables.
 	m.upperSharedPageTables = pagetables.New(newAllocator())
@@ -241,68 +270,6 @@ func newMachine(sandboxID int64) (*machine, error) {
 	runtime.SetFinalizer(m, (*machine).Destroy)
 
 	return m, nil
-}
-
-func (m *machine) getVCPUFromPool() *vCPU {
-	m.vCPUsPoolSpin.Lock()
-	defer m.vCPUsPoolSpin.Unlock()
-
-	// A set bit marks an occupied slot. If there is none, the pool is empty.
-	index, err := m.vCPUsPoolBitmap.FirstOne(0)
-	if err != nil {
-		return nil
-	}
-	c := m.vCPUsPool[index]
-	if c == nil {
-		throw("cached vcpu is empty at an occupied bit")
-	}
-	m.vCPUsPool[index] = nil
-	m.vCPUsPoolBitmap.Remove(index)
-	return c
-}
-
-func (m *machine) cacheVCPU(c *vCPU, tid uint64) {
-	m.vCPUsPoolSpin.Lock()
-
-	// A clear bit marks a free slot. The bitmap may be rounded up to a
-	// multiple of 64, so a returned index beyond the pool size means full.
-	index, err := m.vCPUsPoolBitmap.FirstZero(0)
-	if err == nil && int(index) < len(m.vCPUsPool) {
-		if m.vCPUsPool[index] != nil {
-			throw("cached vcpu not empty at a free bit")
-		}
-		m.vCPUsPool[index] = c
-		m.vCPUsPoolBitmap.Add(index)
-		m.vCPUsPoolSpin.Unlock()
-		return
-	}
-	m.vCPUsPoolSpin.Unlock()
-	c.releaseVCPU()
-}
-
-func (m *machine) lazyPutVCPU(c *vCPU, tid uint64) {
-	m.mu.Lock()
-	c.activePCIDs.reset()
-	delete(m.vCPUs, tid)
-	m.cacheVCPU(c, tid)
-	m.mu.Unlock()
-}
-
-// PutVCPU frees the vCPU. It shall be called with thread locked.
-func (m *machine) PutVCPU() {
-	var c *vCPU
-
-	tid := hosttid.Current()
-	m.mu.Lock()
-	if c = m.vCPUs[tid]; c == nil {
-		m.mu.Unlock()
-		return
-	}
-	m.mu.Unlock()
-	// Make sure we are in HR3 when we really free the vCPU.
-	redpill()
-	m.lazyPutVCPU(c, tid)
-	m.available.Signal()
 }
 
 // mapPhysical checks for the mapping of a physical range, and installs one if
@@ -399,15 +366,8 @@ func (m *machine) Get() *vCPU {
 	}
 
 	for {
-		// Reuse a cached vCPU if one is available, otherwise create a new
-		// one until we reach the hard per-machine limit _SLIMVM_NR_VCPUS.
-		// Once at the limit, wait for the reclaim thread to release a vCPU.
-		c := m.getVCPUFromPool()
-		if c == nil && len(m.vCPUs) < _SLIMVM_NR_VCPUS {
-			c = m.newVCPU()
-		}
-
-		if c != nil {
+		// Create a new vCPU (lazily) until we reach the limit.
+		if c := m.newVCPU(); c != nil {
 			c.lock()
 			m.vCPUs[tid] = c
 			m.mu.Unlock()
@@ -415,9 +375,19 @@ func (m *machine) Get() *vCPU {
 			return c
 		}
 
-		// Wait until something is available.  Note that signaling the
-		// condition variable will have the extra effect of kicking the
-		// vCPUs out of guest mode if that's where they were.
+		// At the limit: steal an idle (vCPUReady) vCPU from another tid,
+		// rebinding it to ours.
+		for origTID, c := range m.vCPUs {
+			if c.state.CompareAndSwap(vCPUReady, vCPUUser) {
+				delete(m.vCPUs, origTID)
+				m.vCPUs[tid] = c
+				m.mu.Unlock()
+				c.loadSegments(tid)
+				return c
+			}
+		}
+
+		// Nothing available; wait for a Put to signal.
 		m.available.Wait()
 	}
 }
@@ -426,6 +396,10 @@ func (m *machine) Get() *vCPU {
 func (m *machine) Put(c *vCPU) {
 	c.unlock()
 	runtime.UnlockOSThread()
+
+	m.mu.RLock()
+	m.available.Signal()
+	m.mu.RUnlock()
 }
 
 // lock marks the vCPU as in user mode.
@@ -626,33 +600,4 @@ func (c *vCPU) BounceToKernel() {
 //go:nosplit
 func (c *vCPU) BounceToHost() {
 	c.bounce(true)
-}
-
-func (m *machine) dumpVCPUStats() {
-	var (
-		nrReady     uint
-		nrUser      uint
-		nrGuest     uint
-		nrGuestUser uint
-	)
-
-	m.mu.RLock()
-	for _, c := range m.vCPUs {
-		switch c.state.Load() &^ vCPUWaiter {
-		case vCPUReady:
-			nrReady++
-
-		case vCPUUser:
-			nrUser++
-
-		case vCPUGuest:
-			nrGuest++
-
-		case vCPUGuest | vCPUUser:
-			nrGuestUser++
-		}
-	}
-	m.mu.RUnlock()
-
-	log.Infof("vCPU stats: Ready=%d, User=%d, Guest=%d, GuestUser=%d", nrReady, nrUser, nrGuest, nrGuestUser)
 }

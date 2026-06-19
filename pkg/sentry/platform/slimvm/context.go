@@ -136,7 +136,12 @@ func (*context) PrepareUninterruptibleSleep() {}
 func (*context) PrepareStop() {}
 
 // Preempt implements platform.Context.Preempt.
-func (*context) Preempt() {}
+//
+// This bounces the vCPU back to the kernel best-effort, without forcing a
+// guest exit (unlike BounceToHost).
+func (c *context) Preempt() {
+	c.interrupt.Preempt()
+}
 
 // PrepareExecve implements platform.Context.PrepareExecve.
 func (*context) PrepareExecve() {}
