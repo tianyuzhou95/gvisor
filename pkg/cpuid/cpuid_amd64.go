@@ -192,15 +192,24 @@ func (fs FeatureSet) VirtualAddressBits() uint32 {
 //go:nosplit
 func (fs FeatureSet) PhysicalAddressBits() uint32 {
 	ax, _, _, _ := fs.query(addressSizes)
-	// On AMD, CPUID 0x80000008 EAX[7:0] reports the physical address
-	// width before the bits consumed by memory encryption (SME/SEV) are
-	// subtracted. CPUID 0x8000001F EBX[11:6] (PhysAddrReduction) gives the
-	// number of those bits. Using the unreduced width would let SlimVM's
-	// fillAddressSpace map beyond the usable physical range.
-	if fs.AMD() {
-		return (ax & 0xff) - 1
+	physBits := ax & 0xff
+	if !fs.AMD() {
+		return physBits
 	}
-	return ax & 0xff
+
+	maxExtended, _, _, _ := fs.query(extendedFunctionInfo)
+	if maxExtended < uint32(amdMemoryEncryptionInfo) {
+		return physBits
+	}
+
+	memEncAX, memEncBX, _, _ := fs.query(amdMemoryEncryptionInfo)
+	if memEncAX&amdMemoryEncryptionFeatureMask == 0 {
+		return physBits
+	}
+	// AMD memory encryption reduces usable physical address width by the
+	// CPUID-reported amount. Match Linux's
+	// arch/x86/kernel/cpu/amd.c:early_detect_mem_encrypt().
+	return physBits - ((memEncBX >> amdPhysAddrReductionShift) & amdPhysAddrReductionMask)
 }
 
 // CacheType describes the type of a cache, as returned in eax[4:0] for eax=4.
