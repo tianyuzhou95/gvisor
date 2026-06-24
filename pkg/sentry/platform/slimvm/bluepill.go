@@ -30,9 +30,6 @@ var (
 	// it will be ignored properly by other parts of the kernel.
 	bounceSignal = syscall.SIGCHLD
 
-	// bounceSignalMask has only bounceSignal set.
-	bounceSignalMask = uint64(1 << (uint64(bounceSignal) - 1))
-
 	// bounce is the interrupt vector used to return to the kernel.
 	bounce = uint32(ring0.VirtualizationException)
 

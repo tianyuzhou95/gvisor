@@ -121,9 +121,6 @@ type vCPU struct {
 
 	vmxConfig slimvmConfig
 
-	// runData for this vCPU.
-	runData *runData
-
 	// machine associated with this vCPU.
 	machine *machine
 

@@ -34,10 +34,9 @@ func (*SlimVM) SeccompInfo() platform.SeccompInfo {
 				seccomp.EqualTo(linux.MEMBARRIER_CMD_PRIVATE_EXPEDITED),
 				seccomp.EqualTo(0),
 			},
-			unix.SYS_MMAP:            seccomp.MatchAll{},
-			unix.SYS_RT_SIGSUSPEND:   seccomp.MatchAll{},
-			unix.SYS_RT_SIGTIMEDWAIT: seccomp.MatchAll{},
-			redpillSyscall:           seccomp.MatchAll{},
+			unix.SYS_MMAP:          seccomp.MatchAll{},
+			unix.SYS_RT_SIGSUSPEND: seccomp.MatchAll{},
+			redpillSyscall:         seccomp.MatchAll{},
 		}),
 		HotSyscalls: hottestSyscalls(),
 	}

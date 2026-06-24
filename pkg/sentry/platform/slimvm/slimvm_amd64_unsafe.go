@@ -23,7 +23,6 @@ import (
 )
 
 var (
-	runDataSize    int
 	hasGuestPCID   bool
 	cpuidSupported = cpuidEntries{nr: _SLIMVM_NR_CPUID_ENTRIES}
 )

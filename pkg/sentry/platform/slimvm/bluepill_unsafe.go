@@ -73,23 +73,21 @@ func bluepillDieCleanly(msg []byte, status uint64) {
 var dieStatusTitle = []byte("slimvm: fatal in bluepillHandler, status =")
 
 var (
-	dieMsgInvalidState     = []byte("slimvm: invalid vCPU state in bluepillHandler\n")
-	dieMsgPendingSignal    = []byte("slimvm: error waiting for pending signal\n")
-	dieMsgUnexpectedSignal = []byte("slimvm: unexpected signal\n")
-	dieMsgNMIInjection     = []byte("slimvm: NMI injection failed\n")
-	dieMsgOOMRelease       = []byte("slimvm: OOM: failed to release dummy bytes\n")
-	dieMsgOOMTime          = []byte("slimvm: OOM: failed to get current time\n")
-	dieMsgOOMRepeat        = []byte("slimvm: OOM: ENOMEM happened more than 5 times on this vCPU in last minute\n")
-	dieMsgRunFailed        = []byte("slimvm: run ioctl failed\n")
-	dieMsgException        = []byte("slimvm: unexpected exception exit\n")
-	dieMsgIO               = []byte("slimvm: unexpected I/O exit\n")
-	dieMsgHypercall        = []byte("slimvm: unexpected hypercall exit\n")
-	dieMsgDebug            = []byte("slimvm: unexpected debug exit\n")
-	dieMsgMMIO             = []byte("slimvm: VM exit MMIO, maybe a physical address is out of range\n")
-	dieMsgShutdown         = []byte("slimvm: unexpected shutdown exit\n")
-	dieMsgFailEntry        = []byte("slimvm: VM entry failed\n")
-	dieMsgMSRWrite         = []byte("slimvm: write msr failed\n")
-	dieMsgUnknown          = []byte("slimvm: unknown VM exit status\n")
+	dieMsgInvalidState = []byte("slimvm: invalid vCPU state in bluepillHandler\n")
+	dieMsgNMIInjection = []byte("slimvm: NMI injection failed\n")
+	dieMsgOOMRelease   = []byte("slimvm: OOM: failed to release dummy bytes\n")
+	dieMsgOOMTime      = []byte("slimvm: OOM: failed to get current time\n")
+	dieMsgOOMRepeat    = []byte("slimvm: OOM: ENOMEM happened more than 5 times on this vCPU in last minute\n")
+	dieMsgRunFailed    = []byte("slimvm: run ioctl failed\n")
+	dieMsgException    = []byte("slimvm: unexpected exception exit\n")
+	dieMsgIO           = []byte("slimvm: unexpected I/O exit\n")
+	dieMsgHypercall    = []byte("slimvm: unexpected hypercall exit\n")
+	dieMsgDebug        = []byte("slimvm: unexpected debug exit\n")
+	dieMsgMMIO         = []byte("slimvm: VM exit MMIO, maybe a physical address is out of range\n")
+	dieMsgShutdown     = []byte("slimvm: unexpected shutdown exit\n")
+	dieMsgFailEntry    = []byte("slimvm: VM entry failed\n")
+	dieMsgMSRWrite     = []byte("slimvm: write msr failed\n")
+	dieMsgUnknown      = []byte("slimvm: unknown VM exit status\n")
 )
 
 // vCPUPtr returns a CPU for the given address.
@@ -144,44 +142,11 @@ func bluepillHandler(context unsafe.Pointer) {
 		switch errno := hostsyscall.RawSyscallErrno(unix.SYS_IOCTL, slimvmFD, _SLIMVM_RUN, uintptr(unsafe.Pointer(&c.vmxConfig))); errno {
 		case 0: // Expected case.
 		case unix.EINTR:
-			// In SlimVM, bounce signals (SIG_BOUNCE) are consumed by
-			// the kernel module in slimvm_signal_handler() and never
-			// reach userspace. EINTR here is triggered by non-bounce
-			// signals (e.g. SIGPROF).
-			//
-			// Use zero timeout so rt_sigtimedwait is non-blocking:
-			// if there is no pending bounce signal, EAGAIN is returned
-			// and we simply rerun the vCPU.
-			timeout := unix.Timespec{}
-			sig, errno := hostsyscall.RawSyscall6(
-				unix.SYS_RT_SIGTIMEDWAIT,
-				uintptr(unsafe.Pointer(&bounceSignalMask)),
-				0,                                 // siginfo.
-				uintptr(unsafe.Pointer(&timeout)), // zero timeout.
-				8,                                 // sigset size.
-				0, 0)
-			if errno == unix.EAGAIN {
-				continue
-			}
-			if errno != 0 {
-				bluepillDieCleanly(dieMsgPendingSignal, uint64(errno))
-			}
-			if sig != uintptr(bounceSignal) {
-				bluepillDieCleanly(dieMsgUnexpectedSignal, uint64(sig))
-			}
-
-			// Check whether the current state of the vCPU is ready
-			// for interrupt injection. Because we don't have a
-			// PIC, we can't inject an interrupt while they are
-			// masked. We need to request a window if it's not
-			// ready.
-			if c.runData.readyForInterruptInjection == 0 {
-				c.runData.requestInterruptWindow = 1
-				continue // Rerun vCPU.
-			} else {
-				// Force injection below; the vCPU is ready.
-				c.runData.exitReason = _SLIMVM_EXIT_IRQ_WINDOW_OPEN
-			}
+			// _SLIMVM_RUN can be interrupted by host signals such as
+			// SIGPROF. SIG_BOUNCE is consumed and injected by the SlimVM
+			// kernel module, including interrupt-window handling, so HR3
+			// should not dequeue it here.
+			continue // Rerun vCPU.
 		case unix.EFAULT:
 			// If a fault is not serviceable due to the host
 			// backing pages having page permissions, instead of an
@@ -267,13 +232,6 @@ func bluepillHandler(context unsafe.Pointer) {
 			return
 		case _SLIMVM_EXIT_MMIO:
 			bluepillDieCleanly(dieMsgMMIO, uint64(c.vmxConfig.status))
-		case _SLIMVM_EXIT_IRQ_WINDOW_OPEN:
-			// NOTE: KVM-residual code. In SlimVM, interrupt injection
-			// (bounce, NMI) is handled entirely by the kernel module
-			// via vmx_inject_bounce()/vmx_inject_nmi() before VM
-			// entry. This exit reason should not occur in practice.
-			// Clear previous injection request.
-			c.runData.requestInterruptWindow = 0
 		case _SLIMVM_EXIT_SHUTDOWN:
 			bluepillDieCleanly(dieMsgShutdown, uint64(c.vmxConfig.status))
 		case _SLIMVM_EXIT_FAIL_ENTRY:
