@@ -75,8 +75,8 @@ jobs:
 
         run_json="$(gh api \
           "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
-        test "$(jq -r '.name' <<<"${run_json}")" = \
-          "AKernel gVisor candidate"
+        test "$(jq -r '.path' <<<"${run_json}")" = \
+          ".github/workflows/akernel-candidate.yml"
         test "$(jq -r '.event' <<<"${run_json}")" = "workflow_dispatch"
         test "$(jq -r '.conclusion' <<<"${run_json}")" = "success"
         test "$(jq -r '.head_sha' <<<"${run_json}")" = "${commit}"
