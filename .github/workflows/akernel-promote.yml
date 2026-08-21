@@ -1,0 +1,175 @@
+name: Promote AKernel gVisor candidate
+
+run-name: Promote candidate run ${{ inputs.candidate_run_id }}
+
+"on":
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful AKernel gVisor candidate workflow run ID
+        required: true
+        type: string
+
+concurrency:
+  group: akernel-gvisor-promote
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    if: github.ref_name == 'develop'
+    runs-on: ubuntu-24.04
+    env:
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Validate run ID
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! "${CANDIDATE_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "invalid candidate run ID: ${CANDIDATE_RUN_ID}" >&2
+          exit 1
+        fi
+
+    - name: Download candidate
+      uses: actions/download-artifact@v5
+      with:
+        name: gvisor-candidate-${{ inputs.candidate_run_id }}
+        path: ${{ runner.temp }}/gvisor-candidate
+        github-token: ${{ github.token }}
+        run-id: ${{ inputs.candidate_run_id }}
+
+    - name: Validate candidate
+      id: candidate
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        candidate_dir="${RUNNER_TEMP}/gvisor-candidate"
+        manifest="${candidate_dir}/manifest.json"
+        test -f "${manifest}"
+        test -f "${candidate_dir}/runsc.x86_64"
+        test -f "${candidate_dir}/runsc.x86_64.sha512"
+
+        repository="$(jq -er '.repository' "${manifest}")"
+        commit="$(jq -er '.commit' "${manifest}")"
+        upstream_tag="$(jq -er '.upstream_tag' "${manifest}")"
+        release_tag="$(jq -er '.release_tag' "${manifest}")"
+        manifest_run_id="$(jq -er '.workflow_run_id' "${manifest}")"
+        manifest_sha512="$(jq -er '.runsc_sha512' "${manifest}")"
+
+        test "${repository}" = "${GITHUB_REPOSITORY}"
+        test "${manifest_run_id}" = "${CANDIDATE_RUN_ID}"
+        [[ "${commit}" =~ ^[0-9a-f]{40}$ ]]
+        [[ "${release_tag}" =~ ^release-[0-9]{8}\.[0-9]+-akernel\.[1-9][0-9]*$ ]]
+        test "${upstream_tag}" = "${release_tag%-akernel.*}"
+
+        run_json="$(gh api \
+          "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
+        test "$(jq -r '.name' <<<"${run_json}")" = \
+          "AKernel gVisor candidate"
+        test "$(jq -r '.event' <<<"${run_json}")" = "workflow_dispatch"
+        test "$(jq -r '.conclusion' <<<"${run_json}")" = "success"
+        test "$(jq -r '.head_sha' <<<"${run_json}")" = "${commit}"
+
+        cd "${candidate_dir}"
+        sha512sum --check runsc.x86_64.sha512
+        actual_sha512="$(sha512sum runsc.x86_64 | cut -d ' ' -f 1)"
+        test "${actual_sha512}" = "${manifest_sha512}"
+        chmod 0755 runsc.x86_64
+        ./runsc.x86_64 --version
+
+        git -C "${GITHUB_WORKSPACE}" fetch origin develop
+        git -C "${GITHUB_WORKSPACE}" cat-file -e "${commit}^{commit}"
+        git -C "${GITHUB_WORKSPACE}" merge-base --is-ancestor \
+          "${commit}" origin/develop
+
+        git -C "${GITHUB_WORKSPACE}" fetch --force --no-tags \
+          https://github.com/google/gvisor.git \
+          "refs/tags/${upstream_tag}:refs/tags/${upstream_tag}"
+        git -C "${GITHUB_WORKSPACE}" merge-base --is-ancestor \
+          "${upstream_tag}" "${commit}"
+
+        echo "commit=${commit}" >>"${GITHUB_OUTPUT}"
+        echo "release_tag=${release_tag}" >>"${GITHUB_OUTPUT}"
+        echo "upstream_tag=${upstream_tag}" >>"${GITHUB_OUTPUT}"
+
+    - name: Create release tag
+      shell: bash
+      env:
+        COMMIT: ${{ steps.candidate.outputs.commit }}
+        RELEASE_TAG: ${{ steps.candidate.outputs.release_tag }}
+      run: |
+        set -euo pipefail
+
+        cd "${GITHUB_WORKSPACE}"
+        if git ls-remote --exit-code --tags origin \
+          "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+          git fetch --force origin \
+            "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "${COMMIT}"
+        else
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --annotate "${RELEASE_TAG}" "${COMMIT}" \
+            --message "AKernel gVisor ${RELEASE_TAG}"
+          git push origin "refs/tags/${RELEASE_TAG}"
+        fi
+
+    - name: Publish prerelease
+      shell: bash
+      env:
+        COMMIT: ${{ steps.candidate.outputs.commit }}
+        RELEASE_TAG: ${{ steps.candidate.outputs.release_tag }}
+        UPSTREAM_TAG: ${{ steps.candidate.outputs.upstream_tag }}
+      run: |
+        set -euo pipefail
+
+        if gh release view "${RELEASE_TAG}" \
+          --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          echo "release already exists: ${RELEASE_TAG}" >&2
+          exit 1
+        fi
+
+        notes="${RUNNER_TEMP}/release-notes.md"
+        {
+          echo "AKernel compatibility build based on gVisor \`${UPSTREAM_TAG}\`."
+          echo
+          echo "Candidate workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}"
+          echo
+          echo "Source commit: \`${COMMIT}\`"
+        } >"${notes}"
+
+        candidate_dir="${RUNNER_TEMP}/gvisor-candidate"
+        gh release create "${RELEASE_TAG}" \
+          "${candidate_dir}/runsc.x86_64" \
+          "${candidate_dir}/runsc.x86_64.sha512" \
+          "${candidate_dir}/manifest.json" \
+          --repo "${GITHUB_REPOSITORY}" \
+          --verify-tag \
+          --title "${RELEASE_TAG}" \
+          --notes-file "${notes}" \
+          --prerelease \
+          --latest=false
+
+    - name: Summarize release
+      shell: bash
+      env:
+        RELEASE_TAG: ${{ steps.candidate.outputs.release_tag }}
+      run: |
+        {
+          echo "### Published AKernel gVisor prerelease"
+          echo
+          echo "- Candidate run: \`${CANDIDATE_RUN_ID}\`"
+          echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+        } >>"${GITHUB_STEP_SUMMARY}"
