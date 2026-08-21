@@ -1,0 +1,133 @@
+name: AKernel gVisor candidate
+
+run-name: Build candidate ${{ inputs.release_tag }}
+
+"on":
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Planned AKernel gVisor release tag
+        required: true
+        type: string
+
+concurrency:
+  group: akernel-gvisor-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.ref_name == 'develop'
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Validate candidate
+      id: candidate
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        if [[ ! "${RELEASE_TAG}" =~ ^release-[0-9]{8}\.[0-9]+-akernel\.[1-9][0-9]*$ ]]; then
+          echo "invalid release tag: ${RELEASE_TAG}" >&2
+          exit 1
+        fi
+
+        upstream_tag="${RELEASE_TAG%-akernel.*}"
+        git fetch --force --no-tags https://github.com/google/gvisor.git \
+          "refs/tags/${upstream_tag}:refs/tags/${upstream_tag}"
+        git merge-base --is-ancestor "${upstream_tag}" "${GITHUB_SHA}"
+
+        if git ls-remote --exit-code --tags origin \
+          "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+          echo "release tag already exists: ${RELEASE_TAG}" >&2
+          exit 1
+        fi
+
+        echo "upstream_tag=${upstream_tag}" >>"${GITHUB_OUTPUT}"
+
+    - name: Install build dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        export DEBIAN_FRONTEND=noninteractive
+        sudo -E apt-get update
+        sudo -E apt-get install -y make
+
+    - name: Build runsc
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        candidate_dir="${RUNNER_TEMP}/gvisor-candidate"
+        mkdir -p "${candidate_dir}/build"
+        make copy TARGETS=runsc DESTINATION="${candidate_dir}/build"
+        install -m 0755 "${candidate_dir}/build/runsc" \
+          "${candidate_dir}/runsc.x86_64"
+        "${candidate_dir}/runsc.x86_64" --version
+
+    - name: Create candidate manifest
+      shell: bash
+      env:
+        UPSTREAM_TAG: ${{ steps.candidate.outputs.upstream_tag }}
+      run: |
+        set -euo pipefail
+
+        candidate_dir="${RUNNER_TEMP}/gvisor-candidate"
+        cd "${candidate_dir}"
+        sha512sum runsc.x86_64 >runsc.x86_64.sha512
+        runsc_sha512="$(cut -d ' ' -f 1 runsc.x86_64.sha512)"
+        changes="$(git -C "${GITHUB_WORKSPACE}" log \
+          --format='%H %s' "${UPSTREAM_TAG}..${GITHUB_SHA}")"
+
+        jq -n \
+          --arg repository "${GITHUB_REPOSITORY}" \
+          --arg commit "${GITHUB_SHA}" \
+          --arg upstream_tag "${UPSTREAM_TAG}" \
+          --arg release_tag "${RELEASE_TAG}" \
+          --arg workflow_run_id "${GITHUB_RUN_ID}" \
+          --arg runsc_sha512 "${runsc_sha512}" \
+          --arg changes "${changes}" \
+          '{
+            schema: 1,
+            repository: $repository,
+            commit: $commit,
+            upstream_tag: $upstream_tag,
+            release_tag: $release_tag,
+            workflow_run_id: $workflow_run_id,
+            runsc_sha512: $runsc_sha512,
+            changes: $changes
+          }' >manifest.json
+
+    - name: Upload candidate
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: gvisor-candidate-${{ github.run_id }}
+        path: |
+          ${{ runner.temp }}/gvisor-candidate/runsc.x86_64
+          ${{ runner.temp }}/gvisor-candidate/runsc.x86_64.sha512
+          ${{ runner.temp }}/gvisor-candidate/manifest.json
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 30
+
+    - name: Summarize candidate
+      shell: bash
+      run: |
+        {
+          echo "### AKernel gVisor candidate"
+          echo
+          echo "- Run ID: \`${GITHUB_RUN_ID}\`"
+          echo "- Planned release: \`${RELEASE_TAG}\`"
+          echo "- Commit: \`${GITHUB_SHA}\`"
+          echo "- Artifact digest: \`${{ steps.upload.outputs.artifact-digest }}\`"
+          echo "- Artifact: ${{ steps.upload.outputs.artifact-url }}"
+        } >>"${GITHUB_STEP_SUMMARY}"
