@@ -603,6 +603,60 @@ func (*fakeNetworkDispatcher) DeliverLinkPacket(tcpip.NetworkProtocolNumber, *st
 	panic("not implemented")
 }
 
+func TestReadVDispatcherContinuesAfterForeignEthernetFrame(t *testing.T) {
+	fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fds[0])
+	defer unix.Close(fds[1])
+
+	local := tcpip.LinkAddress("\x02\x00\x00\x00\x00\x01")
+	foreign := tcpip.LinkAddress("\x04\x00\x00\x00\x00\x02")
+	source := tcpip.LinkAddress("\x06\x00\x00\x00\x00\x03")
+	sink := &fakeNetworkDispatcher{}
+	dispatcher, err := newReadVDispatcher(fds[0], &endpoint{
+		addr:       local,
+		hdrSize:    header.EthernetMinimumSize,
+		dispatcher: sink,
+	}, &Options{ProcessorsPerChannel: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dispatcher.release()
+
+	send := func(destination tcpip.LinkAddress) {
+		t.Helper()
+		frame := make([]byte, header.EthernetMinimumSize+4)
+		header.Ethernet(frame).Encode(&header.EthernetFields{
+			SrcAddr: source,
+			DstAddr: destination,
+			Type:    header.IPv4ProtocolNumber,
+		})
+		frame[header.EthernetMinimumSize] = header.IPv4Version << 4
+		if err := unix.Sendmsg(fds[1], frame, nil, nil, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	send(foreign)
+	if cont, err := dispatcher.dispatch(); !cont || err != nil {
+		t.Fatalf("dispatching foreign frame = (%t, %v), want (true, nil)", cont, err)
+	}
+	if got := len(sink.pkts); got != 0 {
+		t.Fatalf("foreign frame delivered %d packets, want 0", got)
+	}
+
+	send(local)
+	if cont, err := dispatcher.dispatch(); !cont || err != nil {
+		t.Fatalf("dispatching local frame = (%t, %v), want (true, nil)", cont, err)
+	}
+	if got := len(sink.pkts); got != 1 {
+		t.Fatalf("local frame delivered %d packets, want 1", got)
+	}
+	defer sink.pkts[0].DecRef()
+}
+
 func TestDispatchPacketFormat(t *testing.T) {
 	for _, test := range []struct {
 		name          string
