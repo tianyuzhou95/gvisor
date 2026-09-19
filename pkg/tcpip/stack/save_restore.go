@@ -25,6 +25,12 @@ import (
 
 // beforeSave is invoked by stateify.
 func (s *Stack) beforeSave() {
+	// The live route table and NIC ID generator are not serialized:
+	// snapshot them for Restore() before any NIC removal below drops
+	// per-NIC routes.
+	s.checkpointableRoutes = s.GetRouteTable()
+	s.checkpointableNicIDGen = s.nicIDGen.Load()
+
 	// removeConf will be set only in case of save/restore.
 	s.mu.Lock()
 	s.routeMu.RLock()
@@ -59,12 +65,14 @@ func (s *Stack) beforeSave() {
 		return
 	}
 
-	// Remove all the NICs and routes from the stack as they will be
-	// created again during restore based on the new network config,
-	// except for preserved virtual NICs created inside the sandbox.
+	// Preserve upstream TUN/TAP devices and AKernel runtime-created virtual
+	// NICs. Boot NICs are recreated from the new network configuration.
 	deferActs := make([]func(), 0)
 	for id := range s.nics {
 		if _, ok := s.preservedNICs[id]; ok {
+			continue
+		}
+		if _, ok := s.checkpointableNICs[id]; ok {
 			continue
 		}
 		act, _ := s.removeNICLocked(id, true /* closeLinkEndpoint */)
