@@ -784,6 +784,38 @@ func savePrivateMFs(ctx context.Context, w io.Writer, mfsToSave map[checkpoint.R
 	return nil
 }
 
+// SaveOpts contains options for Kernel.SaveTo().
+type SaveOpts struct {
+	// AppMFExcludeCommittedZeroPages is the value of
+	// pgalloc.SaveOpts.ExcludeCommittedZeroPages for the application
+	// MemoryFile. It is expected to reflect application memory usage
+	// behavior, but not necessarily usage of private MemoryFiles.
+	AppMFExcludeCommittedZeroPages bool
+
+	// PrivateMFExternalContent is the value of
+	// pgalloc.SaveOpts.ExternalContent for private (disk-backed) MemoryFiles.
+	// If true, they only save segment metadata; their contents are expected
+	// to be captured out-of-band (the backing host files are preserved or
+	// snapshotted separately) and adopted on restore.
+	PrivateMFExternalContent bool
+
+	// FilestoreSnapshots, if non-empty, requests in-freeze-window snapshots
+	// of the private MemoryFiles: after the kernel pauses and before
+	// memory-file metadata is serialized, each MemoryFile identified by ID
+	// has its backing file FICLONE'd (reflink-cloned) to Dest, so the
+	// snapshot and the saved metadata describe the same instant (valid with
+	// Resume/leave-running).
+	FilestoreSnapshots []checkpoint.FilestoreSnapshot
+
+	// FilestoreSidecar, if non-nil, receives a JSON manifest describing the
+	// FilestoreSnapshots artifacts (names, resource IDs, sizes, sampled
+	// fingerprints) written during the freeze window.
+	FilestoreSidecar io.Writer
+
+	// Resume indicates if the statefile is used for save-resume.
+	Resume bool
+}
+
 // SaveTo saves the state of k to stateFile. It takes ownership of stateFile,
 // pagesMetadata, pagesFile, and fsOpts, even if it returns a non-nil error.
 //
@@ -792,7 +824,7 @@ func savePrivateMFs(ctx context.Context, w io.Writer, mfsToSave map[checkpoint.R
 // +checklocksexclude:k.extMu
 // +checklocksexclude:k.runningTasksMu
 // +checklocksexclude:k.tasks.mu
-func (k *Kernel) SaveTo(ctx context.Context, stateFile, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, appMFExcludeCommittedZeroPages, resume bool, fsOpts *FSSaveOpts) error {
+func (k *Kernel) SaveTo(ctx context.Context, stateFile, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, opts *SaveOpts, fsOpts *FSSaveOpts) error {
 	stateFileCleanup := cleanup.Make(func() { stateFile.Close() })
 	defer stateFileCleanup.Clean()
 
@@ -815,14 +847,14 @@ func (k *Kernel) SaveTo(ctx context.Context, stateFile, pagesMetadata io.WriteCl
 	defer fsCleanup.Clean()
 
 	return k.quiescePausedAnd(ctx, func() error {
-		return k.saveToLocked(ctx, stateFile, pagesMetadata, pagesFile, appMFExcludeCommittedZeroPages, resume, fsOpts, &stateFileCleanup, &pagesCleanup, &fsCleanup)
+		return k.saveToLocked(ctx, stateFile, pagesMetadata, pagesFile, opts, fsOpts, &stateFileCleanup, &pagesCleanup, &fsCleanup)
 	})
 }
 
 // saveToLocked saves the kernel state while the kernel is paused and quiesced.
 //
 // Preconditions: The kernel must be paused and quiesced.
-func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, appMFExcludeCommittedZeroPages, resume bool, fsOpts *FSSaveOpts, stateFileCleanup, pagesCleanup, fsCleanup *cleanup.Cleanup) error {
+func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, opts *SaveOpts, fsOpts *FSSaveOpts, stateFileCleanup, pagesCleanup, fsCleanup *cleanup.Cleanup) error {
 	saveStart := time.Now()
 
 	// Discard unsavable mappings, such as those for host file descriptors.
@@ -845,6 +877,35 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		mf.MarkSavable()
 	}
 
+	// Start a fresh save window on every private MemoryFile: snapshot
+	// credentials stashed by a previous window's SnapshotToFd() must not
+	// leak into this save's ExternalContent metadata (a plain
+	// --skip-filestore-pages save following a --filestore-snapshot-dir
+	// one must describe the backing file's current contents).
+	for _, mf := range mfsToSave {
+		mf.BeginSaveWindow()
+	}
+
+	// Take in-window filestore snapshots (--filestore-snapshot-dir): the
+	// kernel is paused, so there are no writers to the backing files; the
+	// snapshot therefore describes exactly the instant the metadata
+	// below will describe. Snapshots are recorded (size + sampled
+	// fingerprint) on the MemoryFiles so that their ExternalContent save
+	// embeds values describing the snapshot rather than the original
+	// file, which may diverge after the window (leave-running).
+	if len(opts.FilestoreSnapshots) > 0 {
+		entries, err := k.snapshotFilestores(mfsToSave, opts.FilestoreSnapshots)
+		if err != nil {
+			return err
+		}
+		if opts.FilestoreSidecar != nil {
+			if err := checkpoint.WriteFilestoreSidecar(opts.FilestoreSidecar, entries); err != nil {
+				return fmt.Errorf("failed to write filestores.json sidecar: %w", err)
+			}
+		}
+	}
+
+
 	mfsToSaveActual := mfsToSave
 	var matchCtx *fsCheckpointMatchContext
 	if fsOpts != nil {
@@ -862,7 +923,7 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		mfSaveWg.Add(1)
 		go func() {
 			defer mfSaveWg.Done()
-			mfSaveErr = k.saveMemoryFiles(ctx, nil, pagesMetadata, pagesFile, mfsToSaveActual, appMFExcludeCommittedZeroPages) // transfers ownership
+			mfSaveErr = k.saveMemoryFiles(ctx, nil, pagesMetadata, pagesFile, mfsToSaveActual, opts) // transfers ownership
 		}()
 		pagesCleanup.Release()
 		// Defer a Wait() so we wait for k.saveMemoryFiles() to complete even if we
@@ -887,7 +948,7 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		// Pause the network stack.
 		netstackPauseStart := time.Now()
 		// Stack.removeConf should be true when resume=false and vice versa.
-		k.rootNetworkNamespace.Stack().SetRemoveConf(!resume)
+		k.rootNetworkNamespace.Stack().SetRemoveConf(!opts.Resume)
 		log.Infof("Pausing root network namespace")
 		k.rootNetworkNamespace.Stack().Pause()
 		defer k.rootNetworkNamespace.Stack().Resume()
@@ -935,7 +996,7 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 			return mfSaveErr
 		}
 	} else {
-		mfSaveErr = k.saveMemoryFiles(ctx, stateFile, nil, nil, mfsToSaveActual, appMFExcludeCommittedZeroPages)
+		mfSaveErr = k.saveMemoryFiles(ctx, stateFile, nil, nil, mfsToSaveActual, opts)
 		if mfSaveErr != nil {
 			return mfSaveErr
 		}
@@ -963,7 +1024,7 @@ func (k *Kernel) BeforeResume(ctx context.Context) {
 // pagesFile must be non-nil, saveMemoryFiles takes ownership of both
 // pagesMetadata and pagesFile (even if it returns a non-nil error), and
 // MemoryFile state will be saved to pagesMetadata and pagesFile.
-func (k *Kernel) saveMemoryFiles(ctx context.Context, w io.Writer, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, mfsToSave map[checkpoint.ResourceID]*pgalloc.MemoryFile, appMFExcludeCommittedZeroPages bool) error {
+func (k *Kernel) saveMemoryFiles(ctx context.Context, w io.Writer, pagesMetadata io.WriteCloser, pagesFile stateio.AsyncWriter, mfsToSave map[checkpoint.ResourceID]*pgalloc.MemoryFile, opts *SaveOpts) error {
 	memoryStart := time.Now()
 
 	pmw := w
@@ -975,7 +1036,7 @@ func (k *Kernel) saveMemoryFiles(ctx context.Context, w io.Writer, pagesMetadata
 	defer pmwCleanup.Clean()
 
 	mfOpts := pgalloc.SaveOpts{
-		ExcludeCommittedZeroPages: appMFExcludeCommittedZeroPages,
+		ExcludeCommittedZeroPages: opts.AppMFExcludeCommittedZeroPages,
 	}
 	var (
 		asyncPageSaveWg      sync.WaitGroup
@@ -1002,9 +1063,13 @@ func (k *Kernel) saveMemoryFiles(ctx context.Context, w io.Writer, pagesMetadata
 	if err := k.mf.SaveTo(ctx, pmw, &mfOpts); err != nil {
 		return err
 	}
-	// appMFExcludeCommittedZeroPages is expected to reflect application memory
+	// AppMFExcludeCommittedZeroPages is expected to reflect application memory
 	// usage behavior, but not necessarily usage of private MemoryFiles.
 	mfOpts.ExcludeCommittedZeroPages = false
+	// If PrivateMFExternalContent is set, private MemoryFiles only save
+	// segment metadata; their contents are expected to be captured out-of-band
+	// (the backing host files are preserved or snapshotted separately).
+	mfOpts.ExternalContent = opts.PrivateMFExternalContent
 	if err := savePrivateMFs(ctx, pmw, mfsToSave, &mfOpts); err != nil {
 		return err
 	}

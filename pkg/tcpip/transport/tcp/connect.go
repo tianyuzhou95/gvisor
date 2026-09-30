@@ -1567,7 +1567,7 @@ func (e *Endpoint) getTimeWaitDuration() time.Duration {
 // TIME-WAIT state.
 func (e *Endpoint) timeWaitTimerExpired() {
 	e.mu.Lock()
-	if e.EndpointState() != StateTimeWait {
+	if e.timeWaitPaused || e.EndpointState() != StateTimeWait {
 		e.mu.Unlock()
 		return
 	}
