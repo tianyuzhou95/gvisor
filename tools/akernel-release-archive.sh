@@ -47,7 +47,7 @@ verify_archive() {
 
   [[ -f "${archive}" ]]
   contents="$(tar -tjf "${archive}" | sort)"
-  expected=$'containerd-shim-runsc-v1\ngvisor-bin/\ngvisor-bin/checkpointgofer\ngvisor-bin/gvisor-sentry-prewarmer\ngvisor-bin/gvisor_sentry\ngvisor-bin/runsc-metric-server\nrunsc'
+  expected=$'containerd-shim-runsc-v1\ngvisor-bin/\ngvisor-bin/checkpointgofer\ngvisor-bin/gvisor-sentry-prewarmer\ngvisor-bin/gvisor_sentry\ngvisor-bin/runsc-fd-parking\ngvisor-bin/runsc-metric-server\nrunsc'
   if [[ "${contents}" != "${expected}" ]]; then
     echo "unexpected release archive contents: ${archive}" >&2
     diff -u <(printf '%s\n' "${expected}") <(printf '%s\n' "${contents}") >&2 || true
@@ -59,14 +59,14 @@ verify_archive() {
   tar -xjf "${archive}" -C "${verify_dir}"
   for binary in runsc containerd-shim-runsc-v1 \
     gvisor-bin/checkpointgofer gvisor-bin/gvisor-sentry-prewarmer \
-    gvisor-bin/gvisor_sentry gvisor-bin/runsc-metric-server; do
+    gvisor-bin/gvisor_sentry gvisor-bin/runsc-fd-parking gvisor-bin/runsc-metric-server; do
     if ! readelf -h "${verify_dir}/${binary}" \
       | grep -Eq "Machine:[[:space:]]+${machine}$"; then
       echo "unexpected ELF architecture: ${arch} ${binary}" >&2
       exit 1
     fi
   done
-  if [[ "${run_binary}" == true ]]; then
+  if [[ "${run_binary}" == true || "${run_binary}" == --run ]]; then
     "${verify_dir}/runsc" --version
   fi
   rm -rf "${verify_dir}"
