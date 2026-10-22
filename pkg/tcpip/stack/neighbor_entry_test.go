@@ -911,7 +911,10 @@ func TestEntryRestoresReachableTimer(t *testing.T) {
 	e.mu.timer.timer.Stop()
 	e.mu.timer.timer = nil
 	e.mu.Unlock()
-	e.restore()
+	n := e.cache.nic
+	n.linkResQueue.init(n)
+	n.stack.nics = map[tcpip.NICID]*nic{n.id: n}
+	n.stack.RestoreEndpoints()
 	e.handleUpperLevelConfirmation()
 
 	if err := reachableToStale(c, e, nudDisp, linkRes, clock); err != nil {

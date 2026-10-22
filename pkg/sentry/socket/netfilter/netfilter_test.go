@@ -20,7 +20,6 @@ import (
 	"gvisor.dev/gvisor/pkg/abi/linux"
 	"gvisor.dev/gvisor/pkg/marshal"
 	"gvisor.dev/gvisor/pkg/syserr"
-	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv6"
@@ -729,55 +728,5 @@ func TestSetEntriesLoopOrder(t *testing.T) {
 				t.Fatalf("SetEntries expected %v, got %v", syserr.ErrLinkLoop, err)
 			}
 		})
-	}
-}
-
-func TestMasqueradeTargetMarshalRoundTrip(t *testing.T) {
-	maker := masqueradeTargetMakerV4{
-		NetworkProtocol: header.IPv4ProtocolNumber,
-	}
-	target := &masqueradeTarget{MasqueradeTarget: stack.MasqueradeTarget{
-		NetworkProtocol: header.IPv4ProtocolNumber,
-	}}
-	buf := maker.marshal(target)
-
-	var encoded linux.XTNATTargetV0
-	encoded.UnmarshalUnsafe(buf)
-	if got, want := encoded.Target.Name.String(), MasqueradeTargetName; got != want {
-		t.Errorf("encoded target name = %q, want %q", got, want)
-	}
-	if got, want := encoded.Target.TargetSize, uint16(linux.SizeOfXTNATTargetV0); got != want {
-		t.Errorf("encoded target size = %d, want %d", got, want)
-	}
-	if got, want := encoded.NfRange.RangeSize, uint32(1); got != want {
-		t.Errorf("encoded range size = %d, want %d", got, want)
-	}
-	if got := encoded.NfRange.RangeIPV4.Flags; got != 0 {
-		t.Errorf("encoded range flags = %#x, want 0", got)
-	}
-
-	for _, protocol := range []tcpip.TransportProtocolNumber{
-		header.TCPProtocolNumber,
-		header.UDPProtocolNumber,
-	} {
-		filter := emptyIPv4Filter
-		filter.Protocol = protocol
-		got, err := maker.unmarshal(buf, filter)
-		if err != nil {
-			t.Fatalf("unmarshal(protocol=%d) failed: %v", protocol, err)
-		}
-		masquerade, ok := got.(*masqueradeTarget)
-		if !ok {
-			t.Fatalf("unmarshal(protocol=%d) returned %T, want *masqueradeTarget", protocol, got)
-		}
-		if got, want := masquerade.NetworkProtocol, header.IPv4ProtocolNumber; got != want {
-			t.Errorf("network protocol = %d, want %d", got, want)
-		}
-	}
-
-	filter := emptyIPv4Filter
-	filter.Protocol = header.ICMPv4ProtocolNumber
-	if _, err := maker.unmarshal(buf, filter); err != syserr.ErrInvalidArgument {
-		t.Errorf("unmarshal(ICMP) error = %v, want %v", err, syserr.ErrInvalidArgument)
 	}
 }

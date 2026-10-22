@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"gvisor.dev/gvisor/pkg/sentry/checkpoint"
+	"gvisor.dev/gvisor/pkg/sentry/fscheckpoint"
 )
 
 func TestFilestoreSnapshotFilePayload(t *testing.T) {
@@ -43,7 +44,7 @@ func TestFilestoreSnapshotFilePayload(t *testing.T) {
 						addFile()
 					}
 					if split {
-						o.SplitFSCheckpointPaths = []checkpoint.ResourceID{{ContainerName: "test", Path: "/"}}
+						o.SplitFSCheckpointPaths = []fscheckpoint.Bundle{{Paths: []checkpoint.ResourceID{{ContainerName: "test", Path: "/"}}}}
 						for i := 0; i < 4; i++ {
 							addFile()
 						}

@@ -97,14 +97,6 @@ type Stack struct {
 	// +checklocks:mu
 	nics map[tcpip.NICID]*nic `state:"nosave"`
 
-	// checkpointableNICs tracks NICs created with NICOptions.Checkpointable
-	// (veth pairs, bridges, loopbacks): everything needed to serialize them
-	// is in-memory, so they are saved in the checkpoint and re-inserted by
-	// Restore(). The live nics map above is not serialized.
-	//
-	// +checklocks:mu
-	checkpointableNICs map[tcpip.NICID]*nic
-
 	// checkpointableRoutes and checkpointableNicIDGen are snapshots of the
 	// nosave route table and NIC ID generator, taken in beforeSave() and
 	// re-applied in Restore().
@@ -119,7 +111,7 @@ type Stack struct {
 	// nicIDGen is used to generate NIC IDs.
 	nicIDGen atomicbitops.Int32 `state:"nosave"`
 
-	// preservedNICs and preservedRoutes hold virtual NICs (such as tun/tap) and
+	// preservedNICs and preservedRoutes hold virtual NICs (TUN/TAP, veth, bridge) and
 	// their routes across save and restore.
 	// +checklocks:mu
 	preservedNICs map[tcpip.NICID]*nic
@@ -1059,14 +1051,8 @@ func (s *Stack) CreateNICWithOptions(id tcpip.NICID, ep LinkEndpoint, opts NICOp
 		}
 	}
 	s.nics[id] = n
-	if n.kind == "tun" {
+	if n.kind == "tun" || opts.Checkpointable {
 		s.preservedNICs[id] = n
-	}
-	if opts.Checkpointable {
-		if s.checkpointableNICs == nil {
-			s.checkpointableNICs = make(map[tcpip.NICID]*nic)
-		}
-		s.checkpointableNICs[id] = n
 	}
 	if n.IsLoopback() {
 		s.loopbackNIC = n
@@ -1165,7 +1151,6 @@ func (s *Stack) removeNICLocked(id tcpip.NICID, closeLinkEndpoint bool) (func(),
 	}
 	delete(s.nics, id)
 	delete(s.preservedNICs, id)
-	delete(s.checkpointableNICs, id)
 
 	if nic.Primary != nil {
 		b := nic.Primary.NetworkLinkEndpoint.(CoordinatorNIC)
@@ -2204,6 +2189,14 @@ func (s *Stack) ResetConfig() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nics = nics
+	// This stack is being reconfigured from the host network configuration.
+	// Its loopback will be recreated by boot; only nested stacks that do
+	// not pass through ResetConfig retain their saved loopback.
+	for id, n := range s.preservedNICs {
+		if n.IsLoopback() {
+			delete(s.preservedNICs, id)
+		}
+	}
 	s.loopbackNIC = nil
 	s.nicIDGen.Store(0)
 }
@@ -2264,11 +2257,11 @@ func (s *Stack) PrepareRestore() {
 	// in under their original IDs (boot NICs created first keep their IDs;
 	// collisions are skipped).
 	s.mu.Lock()
-	if n := len(s.checkpointableNICs); n > 0 {
+	if n := len(s.preservedNICs); n > 0 {
 		if s.nics == nil {
 			s.nics = make(map[tcpip.NICID]*nic, n)
 		}
-		for id, nic := range s.checkpointableNICs {
+		for id, nic := range s.preservedNICs {
 			if _, exists := s.nics[id]; exists {
 				// A NIC with this ID was already re-created from the boot
 				// network configuration (e.g. the root loopback); the saved
@@ -2287,7 +2280,14 @@ func (s *Stack) PrepareRestore() {
 	if gen := s.nicIDGen.Load(); gen < s.checkpointableNicIDGen {
 		s.nicIDGen.Store(s.checkpointableNicIDGen)
 	}
-	routes := s.checkpointableRoutes
+	// Routes for preserved NICs are restored by the upstream endpoint path.
+	// Retain only the other routes here to avoid restoring any route twice.
+	var routes []tcpip.Route
+	for _, r := range s.checkpointableRoutes {
+		if _, preserved := s.preservedNICs[r.NIC]; !preserved {
+			routes = append(routes, r)
+		}
+	}
 	s.checkpointableRoutes = nil
 	s.mu.Unlock()
 
@@ -2340,6 +2340,9 @@ func (s *Stack) RestoreEndpoints() {
 			resolver.neigh.mu.Lock()
 			for _, entry := range resolver.neigh.mu.cache {
 				entry.mu.Lock()
+				// The callback is not serialized; discard its saved bookkeeping
+				// before the upstream state machine schedules a new timer.
+				entry.mu.timer = timer{}
 				switch entry.mu.neigh.State {
 				case Reachable, Delay, Probe:
 					entry.setStateLocked(entry.mu.neigh.State)
@@ -2376,19 +2379,6 @@ func (s *Stack) CompleteRestore() {
 	// Make sure all the endpoints are loaded correctly before resuming the
 	// protocol level background workers.
 	tcpip.AsyncLoading.Wait()
-
-	// Neighbor state-machine timers are backed by live clock callbacks and are
-	// intentionally not serialized. Recreate them only after the restored
-	// endpoints and stack clock are ready.
-	s.mu.RLock()
-	nics := make([]*nic, 0, len(s.nics))
-	for _, nic := range s.nics {
-		nics = append(nics, nic)
-	}
-	s.mu.RUnlock()
-	for _, nic := range nics {
-		nic.restoreNeighborCaches()
-	}
 
 	// Now restore any protocol level background workers.
 	for _, p := range s.transportProtocols {

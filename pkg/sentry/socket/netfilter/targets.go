@@ -79,9 +79,6 @@ func init() {
 	registerTargetMaker(&snatTargetMakerR2{
 		NetworkProtocol: header.IPv6ProtocolNumber,
 	})
-	registerTargetMaker(&masqueradeTargetMakerV4{
-		NetworkProtocol: header.IPv4ProtocolNumber,
-	})
 
 	// MASQUERADE targets (source NAT to the outgoing interface's address).
 	registerTargetMaker(&masqueradeTargetMaker{

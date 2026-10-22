@@ -5940,3 +5940,47 @@ func TestFindRoute(t *testing.T) {
 		})
 	}
 }
+
+// TestRestoreMixedVirtualNICs verifies that boot reconfiguration cannot reuse
+// either upstream TUN IDs or AKernel bridge/veth IDs before topology restore.
+func TestRestoreMixedVirtualNICs(t *testing.T) {
+	s := stack.New(stack.Options{})
+	defer s.Destroy()
+	if err := s.CreateNICWithOptions(1, loopback.New(), stack.NICOptions{
+		Name: "lo", Checkpointable: true,
+	}); err != nil {
+		t.Fatalf("create boot loopback: %s", err)
+	}
+	for _, tc := range []struct {
+		id   tcpip.NICID
+		opts stack.NICOptions
+	}{
+		{id: 2, opts: stack.NICOptions{Kind: "tun"}},
+		{id: 3, opts: stack.NICOptions{Kind: "bridge", Checkpointable: true}},
+	} {
+		if err := s.CreateNICWithOptions(tc.id, channel.New(1, 1500, ""), tc.opts); err != nil {
+			t.Fatalf("CreateNICWithOptions(%d): %s", tc.id, err)
+		}
+	}
+	s.ResetConfig()
+	if id := s.NextNICID(); id != 1 {
+		t.Fatalf("first boot NIC ID = %d, want 1", id)
+	}
+	if id := s.NextNICID(); id != 4 {
+		t.Fatalf("next NIC ID = %d, want 4 (2 and 3 are preserved)", id)
+	}
+	s.Restore()
+	for _, id := range []tcpip.NICID{2, 3} {
+		if _, ok := s.NICInfo()[id]; !ok {
+			t.Fatalf("virtual NIC %d missing after restore", id)
+		}
+		if err := s.RemoveNIC(id); err != nil {
+			t.Fatalf("RemoveNIC(%d): %s", id, err)
+		}
+	}
+	s.ResetConfig()
+	s.Restore()
+	if got := len(s.NICInfo()); got != 0 {
+		t.Fatalf("removed NICs resurrected after second restore: %d", got)
+	}
+}

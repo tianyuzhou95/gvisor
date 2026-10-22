@@ -72,9 +72,6 @@ func (s *Stack) beforeSave() {
 		if _, ok := s.preservedNICs[id]; ok {
 			continue
 		}
-		if _, ok := s.checkpointableNICs[id]; ok {
-			continue
-		}
 		act, _ := s.removeNICLocked(id, true /* closeLinkEndpoint */)
 		if act != nil {
 			deferActs = append(deferActs, act)
