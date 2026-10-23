@@ -1267,10 +1267,12 @@ func (c *Container) initGoferConfs(ovlConf config.Overlay2, mountHints *boot.Pod
 // Precondition: gofer process must be running.
 func (c *Container) createGoferFilestores(conf *config.Config, ovlConf config.Overlay2, mountHints *boot.PodMountHints) ([]*os.File, error) {
 	var goferFilestores []*os.File
-	// NOTE(gvisor.dev/issue/9834): Create the filestores in the gofer mount
+	// NOTE(gvisor.dev/issue/9834): By default, create filestores in the gofer mount
 	// namespace, so that they don't prevent the host mount points from being
 	// unmounted from the host's mount namespace. We will use /proc/pid/root
-	// to access gofer's mount namespace. See proc_pid_root(5).
+	// to access gofer's mount namespace. See proc_pid_root(5). The explicit
+	// FilestoreParentMountNS option instead pins the launcher mount for
+	// same-mount reflink snapshots on kernels that reject namespace copies.
 	goferRootfs := fmt.Sprintf("/proc/%d/root", c.GoferPid.Load())
 
 	// If set, adopt pre-existing host files (from a checkpoint artifact) as
@@ -1289,7 +1291,7 @@ func (c *Container) createGoferFilestores(conf *config.Config, ovlConf config.Ov
 
 	// Handle rootfs first.
 	rootfsConf := c.GoferMountConfs[0]
-	filestore, err := c.createGoferFilestore(goferRootfs, ovlConf, rootfsConf, c.Spec.Root.Path, "/", mountHints, adopter)
+	filestore, err := c.createGoferFilestore(goferRootfs, ovlConf, rootfsConf, c.Spec.Root.Path, "/", mountHints, adopter, conf.FilestoreParentMountNS)
 	if err != nil {
 		return nil, err
 	}
@@ -1305,7 +1307,7 @@ func (c *Container) createGoferFilestores(conf *config.Config, ovlConf config.Ov
 		}
 		mountConf := c.GoferMountConfs[mountIdx]
 		mountIdx++
-		filestore, err := c.createGoferFilestore(goferRootfs, ovlConf, mountConf, m.Source, m.Destination, mountHints, adopter)
+		filestore, err := c.createGoferFilestore(goferRootfs, ovlConf, mountConf, m.Source, m.Destination, mountHints, adopter, conf.FilestoreParentMountNS)
 		if err != nil {
 			return nil, err
 		}
@@ -1321,7 +1323,7 @@ func (c *Container) createGoferFilestores(conf *config.Config, ovlConf config.Ov
 	return goferFilestores, nil
 }
 
-func (c *Container) createGoferFilestore(goferRootfs string, ovlConf config.Overlay2, goferConf specutils.GoferMountConf, mountSrc string, mountDest string, mountHints *boot.PodMountHints, adopter *filestoreAdopter) (*os.File, error) {
+func (c *Container) createGoferFilestore(goferRootfs string, ovlConf config.Overlay2, goferConf specutils.GoferMountConf, mountSrc string, mountDest string, mountHints *boot.PodMountHints, adopter *filestoreAdopter, parentMountNS bool) (*os.File, error) {
 	if !goferConf.IsFilestorePresent() {
 		return nil, nil
 	}
@@ -1338,6 +1340,12 @@ func (c *Container) createGoferFilestore(goferRootfs string, ovlConf config.Over
 	case specutils.AnonOverlay:
 		if adopter != nil {
 			return adopter.adopt(c, mountDest)
+		}
+		if parentMountNS {
+			// Match the mount used by the host-side checkpoint destinations.
+			// The usual gofer-root lookup retains a distinct mount object on
+			// older kernels and makes FICLONE fail with EXDEV on the same XFS.
+			goferRootfs = ""
 		}
 		return c.createGoferFilestoreInDir(goferRootfs, ovlConf.Medium().HostFileDir())
 	default:
