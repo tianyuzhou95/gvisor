@@ -21,8 +21,10 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
+            bazel_config: x86_64
           - arch: arm64
             runner: ubuntu-24.04-arm
+            bazel_config: aarch64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
@@ -48,3 +50,12 @@ jobs:
       run: |
         set -euo pipefail
         bash tools/akernel-release-archive.sh build "${ARCH}" "${RUNNER_TEMP}/gvisor-pr"
+
+    - name: Test runtime compatibility
+      shell: bash
+      env:
+        BAZEL_OPTIONS: --config=${{ matrix.bazel_config }}
+      run: |
+        set -euo pipefail
+        make test OPTIONS="-c opt --test_timeout=600" \
+          TARGETS="//runsc/config:config_test //runsc/boot:boot_test //runsc/container:filestore_snapshot_test"

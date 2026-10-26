@@ -80,6 +80,15 @@ var boolFlagAllowlist = map[string]struct{}{
 	"vfs2":                             {},
 }
 
+// akernelLegacyBoolFlags preserves the boolean CLI contract of downstream
+// filestore flags that existed before rebasing onto the upstream enum policy.
+// Keep the upstream allowlist and its fixed size unchanged; new AKernel flags
+// must also use enums.
+var akernelLegacyBoolFlags = map[string]struct{}{
+	"filestore-clone-on-adopt": {},
+	"filestore-parent-mountns": {},
+}
+
 // TestNoNewBoolFlagsPlease enforces the policy that no new boolean-typed
 // flags may be added. New flags must be enum-typed instead.
 func TestNoNewBoolFlagsPlease(t *testing.T) {
@@ -91,16 +100,19 @@ func TestNoNewBoolFlagsPlease(t *testing.T) {
 			return
 		}
 		registered[fl.Name] = struct{}{}
-		if _, ok := boolFlagAllowlist[fl.Name]; !ok {
+		_, legacyAKernelFlag := akernelLegacyBoolFlags[fl.Name]
+		if _, ok := boolFlagAllowlist[fl.Name]; !ok && !legacyAKernelFlag {
 			t.Errorf(
 				"Cannot add new boolean flags (found new flag --%s).", fl.Name)
 			t.Errorf("The policy is to only ever use enum-typed flags. Boolean cannot grow new states, and cannot distinguish the 'unset' from 'explicitly set' state, preventing the addition of automatic selection logic down the line.")
 			t.Errorf("Instead, define an enum flag with at least two named values instead. See e.g. --host-settings or `--sidecar-release-enforcement-policy`.")
 		}
 	})
-	for name := range boolFlagAllowlist {
-		if _, ok := registered[name]; !ok {
-			t.Errorf("Flag --%s is in boolFlagAllowlist but is not a registered boolean flag. Thank you for removing boolean flags! Now please remove it from the allowlist.", name)
+	for _, allowlist := range []map[string]struct{}{boolFlagAllowlist, akernelLegacyBoolFlags} {
+		for name := range allowlist {
+			if _, ok := registered[name]; !ok {
+				t.Errorf("Flag --%s is in a boolean allowlist but is not a registered boolean flag. Thank you for removing boolean flags! Now please remove it from the allowlist.", name)
+			}
 		}
 	}
 }
@@ -109,5 +121,12 @@ func TestDoNotAddNewFlagsToAllowlist(t *testing.T) {
 	const expectedNumAllowlistFlagsPleaseDoNotModifyThis = 55 // Never modify this, unless you are decreasing it.
 	if len(boolFlagAllowlist) != expectedNumAllowlistFlagsPleaseDoNotModifyThis {
 		t.Errorf("Cannot add new boolean flags to allowlist")
+	}
+}
+
+func TestDoNotAddNewAKernelBoolFlags(t *testing.T) {
+	const legacyFlags = 2 // Decrease this when retiring a legacy boolean flag.
+	if len(akernelLegacyBoolFlags) != legacyFlags {
+		t.Errorf("Cannot add new AKernel boolean flags; use enum-typed flags instead")
 	}
 }
