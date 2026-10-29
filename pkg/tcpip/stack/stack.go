@@ -2395,8 +2395,19 @@ func (s *Stack) CompleteRestore() {
 	}
 }
 
+// PrepareResume thaws source conntrack after state encoding, including failed
+// saves. Call this for every saved stack before resuming any of them: a veth
+// can synchronously deliver output to a different namespace's conntrack.
+// It is safe when encoding never reached this stack's IPTables save hook.
+func (s *Stack) PrepareResume() {
+	if s.tables != nil {
+		s.tables.resumeAfterSave()
+	}
+}
+
 // Resume resumes the stack after a save.
 func (s *Stack) Resume() {
+	s.PrepareResume()
 	s.mu.Lock()
 	for _, nic := range s.preservedNICs {
 		for _, resolver := range nic.linkAddrResolvers {
@@ -2418,12 +2429,6 @@ func (s *Stack) Resume() {
 	// Now resume any protocol level background workers.
 	for _, p := range s.transportProtocols {
 		p.proto.Resume()
-	}
-	// Resume conntrack packet processing and its reaper in a source stack
-	// that continues running after a live checkpoint. Restored stacks use
-	// restoreReaper instead because their locks are newly initialized.
-	if s.tables != nil {
-		s.tables.resumeAfterSave()
 	}
 }
 
@@ -2844,6 +2849,9 @@ func (s *Stack) SetNICStack(id tcpip.NICID, peer *Stack) (tcpip.NICID, tcpip.Err
 
 	linkEp := nic.NetworkLinkEndpoint.(LinkEndpoint)
 	name := nic.Name()
+	// Capture ownership metadata before removeNICLocked drops the saved NIC.
+	_, checkpointable := s.preservedNICs[id]
+	opts := NICOptions{Name: name, Kind: nic.kind, Checkpointable: checkpointable}
 
 	deferAct, err := s.removeNICLocked(id, false /* closeLinkEndpoint */)
 	s.mu.Unlock()
@@ -2855,7 +2863,7 @@ func (s *Stack) SetNICStack(id tcpip.NICID, peer *Stack) (tcpip.NICID, tcpip.Err
 	}
 
 	id = tcpip.NICID(peer.NextNICID())
-	return id, peer.CreateNICWithOptions(id, linkEp, NICOptions{Name: name})
+	return id, peer.CreateNICWithOptions(id, linkEp, opts)
 }
 
 // SetRemoveConf sets the removeConf in stack to the given value.

@@ -1214,6 +1214,9 @@ func (s *Stack) ReplaceConfig(st inet.Stack) {
 	s.Stack.ReplaceConfig(st.(*Stack).Stack)
 }
 
+// PrepareResume implements inet.Stack.PrepareResume.
+func (s *Stack) PrepareResume() { s.Stack.PrepareResume() }
+
 // Resume implements inet.Stack.Resume.
 func (s *Stack) Resume() {
 	s.Stack.Resume()

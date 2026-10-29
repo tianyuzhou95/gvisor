@@ -134,6 +134,8 @@ type handshake struct {
 // callback runs later, so its lock state is not a precondition on timerHandler.
 func timerHandler(e *Endpoint, f func() tcpip.Error) func() {
 	return func() {
+		e.protocol.timerMu.RLock()
+		defer e.protocol.timerMu.RUnlock()
 		e.mu.Lock()
 		if err := f(); err != nil {
 			e.lastErrorMu.Lock()
@@ -1475,6 +1477,8 @@ func (e *Endpoint) disableKeepaliveTimer() {
 // finWait2TimerExpired is called when the FIN-WAIT-2 timeout is hit
 // and the peer hasn't sent us a FIN.
 func (e *Endpoint) finWait2TimerExpired() {
+	e.protocol.timerMu.RLock()
+	defer e.protocol.timerMu.RUnlock()
 	e.mu.Lock()
 	e.transitionToStateCloseLocked()
 	e.mu.Unlock()

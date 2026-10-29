@@ -5984,3 +5984,41 @@ func TestRestoreMixedVirtualNICs(t *testing.T) {
 		t.Fatalf("removed NICs resurrected after second restore: %d", got)
 	}
 }
+
+// TestMovedNICCheckpointability verifies the registry used to reconstruct NICs
+// after decoding state (the ordinary nics map is not serialized).
+func TestMovedNICCheckpointability(t *testing.T) {
+	for _, checkpointable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("checkpointable=%t", checkpointable), func(t *testing.T) {
+			src := stack.New(stack.Options{})
+			dst := stack.New(stack.Options{})
+			defer src.Destroy()
+			defer dst.Destroy()
+			if err := src.CreateNICWithOptions(1, channel.New(1, 1500, ""), stack.NICOptions{
+				Name: "peer", Kind: "veth", Checkpointable: checkpointable,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			id, err := src.SetNICStack(1, dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := dst.NICInfo()[id].Kind; got != "veth" {
+				t.Errorf("moved NIC kind = %q, want veth", got)
+			}
+			for i := 0; i < 2; i++ {
+				dst.ResetConfig()
+				dst.PrepareRestore()
+				_, present := dst.NICInfo()[id]
+				if present != checkpointable {
+					t.Fatalf("restore %d: moved NIC present=%t, want %t", i, present, checkpointable)
+				}
+				src.ResetConfig()
+				src.PrepareRestore()
+				if len(src.NICInfo()) != 0 {
+					t.Fatal("moved NIC resurrected in source")
+				}
+			}
+		})
+	}
+}

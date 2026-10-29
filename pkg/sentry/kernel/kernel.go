@@ -905,7 +905,6 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		}
 	}
 
-
 	mfsToSaveActual := mfsToSave
 	var matchCtx *fsCheckpointMatchContext
 	if fsOpts != nil {
@@ -950,8 +949,18 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		// Stack.removeConf should be true when resume=false and vice versa.
 		k.rootNetworkNamespace.Stack().SetRemoveConf(!opts.Resume)
 		log.Infof("Pausing root network namespace")
+		stacks := []inet.Stack{k.rootNetworkNamespace.Stack()}
+		// Thaw all conntrack locks before any endpoint or timer can emit into
+		// another namespace. Run this on serialization failure as well.
+		defer func() {
+			for _, stk := range stacks {
+				stk.PrepareResume()
+			}
+			for _, stk := range stacks {
+				stk.Resume()
+			}
+		}()
 		k.rootNetworkNamespace.Stack().Pause()
-		defer k.rootNetworkNamespace.Stack().Resume()
 		// Non-root network namespaces (e.g. inner container namespaces
 		// created by a nested docker daemon) carry their own network
 		// stacks, which are part of the saved state: quiesce them too
@@ -959,7 +968,7 @@ func (k *Kernel) saveToLocked(ctx context.Context, stateFile, pagesMetadata io.W
 		for _, ns := range rootNS.ChildrenSnapshot() {
 			if stk := ns.Stack(); stk != nil {
 				stk.Pause()
-				defer stk.Resume()
+				stacks = append(stacks, stk)
 			}
 		}
 		log.Infof("Pausing network namespaces took [%s].", time.Since(netstackPauseStart))

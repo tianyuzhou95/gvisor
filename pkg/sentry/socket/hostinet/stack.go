@@ -461,6 +461,9 @@ func (s *Stack) SetFiles(netDev, netSNMP *os.File) {
 	s.netSNMPFile = netSNMP
 }
 
+// PrepareResume implements inet.Stack.PrepareResume.
+func (*Stack) PrepareResume() {}
+
 // Resume implements inet.Stack.Resume.
 func (*Stack) Resume() {}
 
