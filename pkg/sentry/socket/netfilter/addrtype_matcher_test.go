@@ -108,7 +108,7 @@ func TestAddrtypeNamespaceAndAddressClasses(t *testing.T) {
 		{[4]byte{192, 0, 2, 99}, linux.XT_ADDRTYPE_UNICAST},
 		{[4]byte{198, 51, 100, 1}, linux.XT_ADDRTYPE_UNICAST},
 		{[4]byte{192, 0, 2, 255}, linux.XT_ADDRTYPE_BROADCAST},
-		{[4]byte{192, 0, 2, 0}, linux.XT_ADDRTYPE_BROADCAST},
+		{[4]byte{192, 0, 2, 0}, linux.XT_ADDRTYPE_UNICAST},
 		{[4]byte{0, 1, 2, 3}, linux.XT_ADDRTYPE_BROADCAST},
 		{[4]byte{255, 255, 255, 255}, linux.XT_ADDRTYPE_BROADCAST},
 		{[4]byte{224, 0, 0, 1}, linux.XT_ADDRTYPE_MULTICAST},
@@ -150,6 +150,19 @@ func TestAddrtypeNamespaceAndAddressClasses(t *testing.T) {
 		t.Fatal("cached removed address")
 	}
 }
+
+// A subnet's lowest address is ordinary unicast until explicitly assigned.
+func TestAddrtypeAssignedSubnetLowestAddress(t *testing.T) {
+	addr := tcpip.AddrFrom4([4]byte{192, 0, 2, 0})
+	s := addrtypeStack(t, addr)
+	p := addrtypePacket(addr, addr)
+	defer p.DecRef()
+	m := AddrtypeMatcher{stack: s, source: linux.XT_ADDRTYPE_LOCAL, dest: linux.XT_ADDRTYPE_LOCAL}
+	if match, hotdrop := m.Match(stack.Output, p, "", "eth1"); !match || hotdrop {
+		t.Fatalf("assigned lowest address: Match = %t,%t", match, hotdrop)
+	}
+}
+
 func TestAddrtypeTableBindingAndHooks(t *testing.T) {
 	for _, flags := range []uint32{0, linux.XT_ADDRTYPE_LIMIT_IFACE_IN, linux.XT_ADDRTYPE_LIMIT_IFACE_OUT} {
 		for _, hook := range []stack.Hook{stack.Prerouting, stack.Input, stack.Output, stack.Postrouting} {
