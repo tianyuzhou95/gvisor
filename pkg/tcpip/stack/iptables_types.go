@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 
+	"gvisor.dev/gvisor/pkg/atomicbitops"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 )
@@ -85,6 +86,11 @@ const (
 // +stateify savable
 type IPTables struct {
 	connections ConnTrack
+
+	// Only the source which acquired the save lock may release it. The
+	// serializer can fail before visiting this object; restored locks start
+	// unlocked. PrepareResume and Resume may both request the same thaw.
+	saveLocked atomicbitops.Bool `state:"nosave"`
 
 	reaper tcpip.Timer `state:"nosave"`
 

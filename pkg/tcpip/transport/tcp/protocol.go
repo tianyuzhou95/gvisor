@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"gvisor.dev/gvisor/pkg/sync"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/header/parse"
@@ -88,6 +89,12 @@ const (
 // +stateify savable
 type protocol struct {
 	stack *stack.Stack
+
+	// timerMu gates callbacks before they take endpoint locks. Pause drains
+	// admitted callbacks before the serializer can freeze conntrack. Source
+	// Resume opens admission only after all saved stacks have been thawed.
+	timerMu      sync.RWMutex `state:"nosave"`
+	timersPaused bool         `state:"nosave"`
 
 	mu protocolRWMutex `state:"nosave"`
 
@@ -545,6 +552,8 @@ func (p *protocol) Wait() {
 
 // Pause implements stack.TransportProtocol.Pause.
 func (p *protocol) Pause() {
+	p.timerMu.Lock()
+	p.timersPaused = true
 	p.dispatcher.pause()
 	// Packet processors are stopped, but TIME_WAIT callbacks run independently.
 	// Freeze them before state traversal can observe endpoint slice mutation.
@@ -577,6 +586,10 @@ func (p *protocol) Resume() {
 	}
 	p.pausedTimeWaitEndpoints = nil
 	p.dispatcher.resume()
+	if p.timersPaused {
+		p.timersPaused = false
+		p.timerMu.Unlock()
+	}
 }
 
 // Restore implements stack.TransportProtocol.Restore.

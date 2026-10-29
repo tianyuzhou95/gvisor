@@ -217,6 +217,7 @@ go_test(
     size = "small",
     srcs = [
         "cubic_test.go",
+        "live_save_timer_test.go",
         "endpoint_test.go",
         "main_test.go",
         "rack_test.go",

@@ -201,6 +201,9 @@ func (s *TestStack) ResetConfig() {
 	s.RouteList = nil
 }
 
+// PrepareResume implements inet.Stack.PrepareResume.
+func (s *TestStack) PrepareResume() {}
+
 // Resume implements Stack.
 func (s *TestStack) Resume() {}
 

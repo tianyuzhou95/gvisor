@@ -100,6 +100,10 @@ type Stack interface {
 	// Pause pauses the network stack before save.
 	Pause()
 
+	// PrepareResume thaws save-owned network state. Call on every paused
+	// namespace before resuming any namespace, including on save failure.
+	PrepareResume()
+
 	// Resume resumes the network stack after save.
 	Resume()
 

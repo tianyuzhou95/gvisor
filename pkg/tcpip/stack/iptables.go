@@ -697,6 +697,7 @@ func (it *IPTables) beforeSave() {
 	}
 	// Prevent others from modifying the connection table.
 	it.connections.mu.Lock()
+	it.saveLocked.Store(true)
 }
 
 // resumeAfterSave resumes iptables background work and packet processing in
@@ -704,6 +705,9 @@ func (it *IPTables) beforeSave() {
 // holds the conntrack lock while state is encoded; unlike a restored stack,
 // the source keeps using the same lock and must release it explicitly.
 func (it *IPTables) resumeAfterSave() {
+	if !it.saveLocked.Swap(false) {
+		return
+	}
 	it.connections.mu.Unlock()
 
 	it.mu.RLock()
